@@ -1,0 +1,10 @@
+[Appearance]
+HideSkinBorders=true
+Skin=materia-dark
+SkinInstalledWithKns=true
+
+[Dialogs]
+FirstRun=false
+
+[Window]
+Height=60

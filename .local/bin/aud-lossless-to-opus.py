@@ -7,16 +7,16 @@
 # ]
 # ///
 """
-lossless_to_opus — Batch convert lossless audio files to Opus with full metadata preservation.
+aud-lossless-to-opus — Batch convert lossless audio files to Opus with full metadata preservation.
 
 Supported input formats: FLAC, WAV, AIFF/AIF, ALAC (.m4a), WavPack (.wv), Monkey's Audio (.ape)
 
 Usage:
-    lossless_to_opus                              # converts current directory
-    lossless_to_opus ~/Music/Artist1 ~/Music/Artist2
-    lossless_to_opus --dry-run ~/Music/
-    lossless_to_opus --keep-originals ~/Music/
-    lossless_to_opus --bitrate 128 ~/Music/
+    aud-lossless-to-opus                              # converts current directory
+    aud-lossless-to-opus ~/Music/Artist1 ~/Music/Artist2
+    aud-lossless-to-opus --dry-run ~/Music/
+    aud-lossless-to-opus --keep-originals ~/Music/
+    aud-lossless-to-opus --bitrate 128 ~/Music/
 """
 
 import sys
@@ -315,7 +315,7 @@ def verify(src: Path, opus: Path, src_info: dict) -> Tuple[bool, List[str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="lossless_to_opus",
+        prog="aud-lossless-to-opus",
         description="Batch-convert lossless audio → Opus at ~180 kbps VBR. "
                     "Copies metadata & cover art, verifies before deleting originals.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -324,11 +324,11 @@ supported formats:
   FLAC (.flac), WAV (.wav), AIFF (.aiff/.aif), ALAC (.m4a), WavPack (.wv), Monkey's Audio (.ape)
 
 examples:
-  lossless_to_opus                              # current directory
-  lossless_to_opus ~/Music/Artist1 ~/Music/Artist2
-  lossless_to_opus --dry-run ~/Music/
-  lossless_to_opus --keep-originals --no-verify ~/Music/
-  lossless_to_opus --bitrate 128 ~/Music/
+  aud-lossless-to-opus                              # current directory
+  aud-lossless-to-opus ~/Music/Artist1 ~/Music/Artist2
+  aud-lossless-to-opus --dry-run ~/Music/
+  aud-lossless-to-opus --keep-originals --no-verify ~/Music/
+  aud-lossless-to-opus --bitrate 128 ~/Music/
         """,
     )
     parser.add_argument("folders", nargs="*", type=Path,

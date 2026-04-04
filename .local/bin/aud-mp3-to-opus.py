@@ -7,13 +7,13 @@
 # ]
 # ///
 """
-mp3_to_opus — Batch convert MP3 files to Opus with full metadata preservation.
+aud-mp3-to-opus — Batch convert MP3 files to Opus with full metadata preservation.
 
 Usage:
-    mp3_to_opus                              # converts current directory
-    mp3_to_opus ~/Music/Artist1 ~/Music/Artist2
-    mp3_to_opus --dry-run ~/Music/
-    mp3_to_opus --keep-originals ~/Music/
+    aud-mp3-to-opus                              # converts current directory
+    aud-mp3-to-opus ~/Music/Artist1 ~/Music/Artist2
+    aud-mp3-to-opus --dry-run ~/Music/
+    aud-mp3-to-opus --keep-originals ~/Music/
 """
 
 import sys
@@ -245,16 +245,16 @@ def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="mp3_to_opus",
+        prog="aud-mp3-to-opus",
         description="Batch-convert MP3 → Opus. Copies metadata & cover art, "
                     "targets 70%% of source bitrate, verifies before deleting originals.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  mp3_to_opus                              # current directory
-  mp3_to_opus ~/Music/Artist1 ~/Music/Artist2
-  mp3_to_opus --dry-run ~/Music/
-  mp3_to_opus --keep-originals --no-verify ~/Music/
+  aud-mp3-to-opus                              # current directory
+  aud-mp3-to-opus ~/Music/Artist1 ~/Music/Artist2
+  aud-mp3-to-opus --dry-run ~/Music/
+  aud-mp3-to-opus --keep-originals --no-verify ~/Music/
         """,
     )
     parser.add_argument("folders", nargs="*", type=Path,

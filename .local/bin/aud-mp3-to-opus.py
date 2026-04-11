@@ -14,6 +14,8 @@ Usage:
     aud-mp3-to-opus ~/Music/Artist1 ~/Music/Artist2
     aud-mp3-to-opus --dry-run ~/Music/
     aud-mp3-to-opus --keep-originals ~/Music/
+    aud-mp3-to-opus --list                       # pick subdirs of current directory
+    aud-mp3-to-opus --list ~/Music/              # pick subdirs of ~/Music/
 """
 
 import sys
@@ -43,6 +45,8 @@ try:
     from rich.table import Table
     from rich.panel import Panel
     from rich.rule import Rule
+    from rich.columns import Columns
+    from rich.text import Text
 except ImportError:
     _missing.append("rich     →  pip install rich")
 
@@ -243,6 +247,131 @@ def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
     return len(issues) == 0, issues
 
 
+def parse_selection(raw: str, max_idx: int) -> List[int]:
+    """
+    Parse a selection string like "1 3 5-8 10" into a sorted list of
+    0-based indices.  Returns an empty list if any token is invalid.
+    Space or comma separated; ranges supported (e.g. 5-8).
+    """
+    indices: set[int] = set()
+    for token in raw.replace(",", " ").split():
+        if "-" in token:
+            parts = token.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except ValueError:
+                console.print(f"  [red]✗[/red] Invalid range: [bold]{token}[/bold]")
+                return []
+            if lo < 1 or hi > max_idx or lo > hi:
+                console.print(
+                    f"  [red]✗[/red] Range [bold]{token}[/bold] out of bounds "
+                    f"(1–{max_idx})"
+                )
+                return []
+            indices.update(range(lo - 1, hi))
+        else:
+            try:
+                n = int(token)
+            except ValueError:
+                console.print(f"  [red]✗[/red] Not a number: [bold]{token}[/bold]")
+                return []
+            if n < 1 or n > max_idx:
+                console.print(
+                    f"  [red]✗[/red] Number [bold]{n}[/bold] out of bounds "
+                    f"(1–{max_idx})"
+                )
+                return []
+            indices.add(n - 1)
+    return sorted(indices)
+
+
+def get_subdirs(base: Path) -> List[Path]:
+    """Return sorted list of immediate subdirectories of *base*."""
+    try:
+        return sorted(
+            (p for p in base.iterdir()
+             if p.is_dir() and not p.name.startswith(".")),
+            key=lambda p: p.name.lower(),
+        )
+    except PermissionError:
+        console.print(f"[red]✗[/red] Permission denied: [bold]{base}[/bold]")
+        return []
+
+
+def print_dir_grid(subdirs: List[Path]) -> None:
+    """Print numbered subdirectories in a compact multi-column grid."""
+    if not subdirs:
+        console.print("  [yellow]No subdirectories found.[/yellow]")
+        return
+
+    num_w = len(str(len(subdirs)))
+    items = []
+    for i, d in enumerate(subdirs, 1):
+        label = Text()
+        label.append(f"{i:>{num_w}}", style="dim cyan")
+        label.append("  ")
+        label.append(d.name, style="bold")
+        items.append(label)
+
+    console.print(Columns(items, padding=(0, 2), equal=True))
+
+
+def list_and_select(base: Path) -> List[Path]:
+    """
+    Show a grid of subdirectories under *base*, prompt for selection,
+    and return the chosen Path objects.
+    """
+    subdirs = get_subdirs(base)
+
+    console.print()
+    console.print(Panel.fit(
+        f"[bold cyan]Select directories[/bold cyan]   "
+        f"[dim]{base}[/dim]",
+        border_style="cyan",
+        padding=(0, 2),
+    ))
+    console.print()
+
+    if not subdirs:
+        console.print("  [yellow]No subdirectories found.[/yellow]")
+        console.print()
+        return []
+
+    print_dir_grid(subdirs)
+    console.print()
+    console.print(
+        "  [dim]Enter numbers, ranges, or both — e.g. [bold]1 3 5-8[/bold]  "
+        "(space or comma separated)[/dim]"
+    )
+    console.print()
+
+    while True:
+        try:
+            raw = input("  Selection: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            console.print("  [yellow]Cancelled.[/yellow]")
+            sys.exit(0)
+
+        if not raw:
+            console.print("  [yellow]Nothing selected. Exiting.[/yellow]")
+            sys.exit(0)
+
+        idxs = parse_selection(raw, len(subdirs))
+        if idxs:
+            chosen = [subdirs[i] for i in idxs]
+            console.print()
+            console.print(
+                f"  [green]●[/green] Selected [bold]{len(chosen)}[/bold] "
+                f"director{'y' if len(chosen) == 1 else 'ies'}:"
+            )
+            for d in chosen:
+                console.print(f"    [cyan]•[/cyan] {d}")
+            console.print()
+            return chosen
+        # parse_selection already printed the error; loop to re-prompt
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="aud-mp3-to-opus",
@@ -255,11 +384,16 @@ examples:
   aud-mp3-to-opus ~/Music/Artist1 ~/Music/Artist2
   aud-mp3-to-opus --dry-run ~/Music/
   aud-mp3-to-opus --keep-originals --no-verify ~/Music/
+  aud-mp3-to-opus --list                       # browse & pick subdirs of current dir
+  aud-mp3-to-opus --list ~/Music/              # browse & pick subdirs of ~/Music/
         """,
     )
     parser.add_argument("folders", nargs="*", type=Path,
                         metavar="FOLDER",
                         help="Folders to search recursively (default: current directory)")
+    parser.add_argument("--list", "-l", action="store_true",
+                        help="Show a numbered grid of subdirectories and interactively "
+                             "select which ones to convert (supports ranges, e.g. 1-10)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would happen without converting anything")
     parser.add_argument("--keep-originals", action="store_true",
@@ -272,7 +406,14 @@ examples:
                         help="Re-convert even if .opus already exists")
     args = parser.parse_args()
 
-    if not args.folders:
+    # ── --list mode ───────────────────────────────────────────────────────────
+    if args.list:
+        # With --list, at most one folder makes sense as the parent to browse.
+        base = args.folders[0] if args.folders else Path.cwd()
+        args.folders = list_and_select(base)
+        if not args.folders:
+            sys.exit(0)
+    elif not args.folders:
         args.folders = [Path.cwd()]
 
     interrupted = False

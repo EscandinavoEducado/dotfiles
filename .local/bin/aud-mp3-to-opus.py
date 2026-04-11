@@ -59,7 +59,7 @@ BITRATE_RATIO     = 0.7
 MIN_BITRATE_KBPS  = 24
 MAX_BITRATE_KBPS  = 320
 DEFAULT_BITRATE   = 160
-DURATION_TOLS     = 1.0
+DURATION_TOLS     = 2.0
 
 console = Console(highlight=False)
 

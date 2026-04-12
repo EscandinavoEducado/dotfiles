@@ -1,6 +1,6 @@
 {
   "panel": {
-    "numrows": "6"
+    "numrows": "7"
   },
   "0": {
     "tags": [
@@ -50,6 +50,14 @@
     ],
     "titles": [
       "&Album Artist"
+    ]
+  },
+  "6": {
+    "tags": [
+      "__dirpath"
+    ],
+    "titles": [
+      "Dirpath"
     ]
   }
 }

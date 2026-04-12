@@ -19,6 +19,7 @@ Usage:
     aud-lossless-to-opus --dry-run ~/Music/
     aud-lossless-to-opus --keep-originals ~/Music/
     aud-lossless-to-opus --bitrate 128 ~/Music/
+    aud-lossless-to-opus --workers 4 ~/Music/         # convert 4 files at a time
 """
 
 import sys
@@ -29,6 +30,8 @@ import signal
 import base64
 import shutil
 import math
+import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -466,6 +469,7 @@ examples:
   aud-lossless-to-opus --dry-run ~/Music/
   aud-lossless-to-opus --keep-originals --no-verify ~/Music/
   aud-lossless-to-opus --bitrate 128 ~/Music/
+  aud-lossless-to-opus --workers 4 ~/Music/         # convert 4 files in parallel
         """,
     )
     parser.add_argument("folders", nargs="*", type=Path,
@@ -486,6 +490,10 @@ examples:
                         help="Skip file if a .opus sibling already exists (default: on)")
     parser.add_argument("--no-skip-existing", dest="skip_existing", action="store_false",
                         help="Re-convert even if .opus already exists")
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 4,
+                        metavar="N",
+                        help="Number of files to convert in parallel "
+                             f"(default: number of CPU cores, currently {os.cpu_count() or 4})")
     args = parser.parse_args()
 
     if args.list:
@@ -498,16 +506,20 @@ examples:
         args.folders = [Path.cwd()]
 
     interrupted = False
-    current_opus: Optional[Path] = None
+    lock = threading.Lock()
+    _active_opus: set[Path] = set()
 
     def _sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
-        if current_opus is not None and current_opus.exists():
-            try:
-                current_opus.unlink()
-            except OSError:
-                pass
+        with lock:
+            to_clean = set(_active_opus)
+        for p in to_clean:
+            if p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
     signal.signal(signal.SIGINT, _sigint)
 
@@ -562,6 +574,8 @@ examples:
     failures: List[Tuple[Path, str]] = []
 
     console.print(Rule("[bold]Converting[/bold]"))
+    if args.workers > 1:
+        console.print(f"  [dim]Running {args.workers} workers in parallel[/dim]")
     console.print()
 
     with Progress(
@@ -578,25 +592,27 @@ examples:
             total=len(src_files),
         )
 
-        for src in src_files:
+        def process_one(src: Path) -> None:
             if interrupted:
-                prog.print("  [yellow]⚡ Interrupted by user.[/yellow]")
-                break
+                prog.advance(task)
+                return
 
             opus = src.with_suffix(".opus")
             name = escape(src.name)
 
-            label = name[:52] + "…" if len(name) > 53 else name
-            prog.update(task, description=f"[dim]{label}[/dim]")
+            if args.workers == 1:
+                label = name[:52] + "…" if len(name) > 53 else name
+                prog.update(task, description=f"[dim]{label}[/dim]")
 
             if args.skip_existing and opus.exists():
                 src_info = get_source_info(src)
                 valid, _ = verify(src, opus, src_info)
                 if valid:
                     prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
-                    stats["skipped"] += 1
+                    with lock:
+                        stats["skipped"] += 1
                     prog.advance(task)
-                    continue
+                    return
                 else:
                     prog.print(
                         f"  [yellow]⚠[/yellow]  [dim]{name}[/dim]  "
@@ -608,15 +624,23 @@ examples:
 
             src_size = src.stat().st_size
 
-            current_opus = opus
+            with lock:
+                _active_opus.add(opus)
             ok, err = convert(src, opus, args.bitrate)
-            current_opus = None
+            with lock:
+                _active_opus.discard(opus)
+
+            if interrupted and not ok:
+                prog.advance(task)
+                return
+
             if not ok:
                 prog.print(f"  [red]✗ FAIL[/red]  [dim]{name}[/dim]  [red]{err}[/red]")
-                stats["failed"] += 1
-                failures.append((src, f"ffmpeg: {err}"))
+                with lock:
+                    stats["failed"] += 1
+                    failures.append((src, f"ffmpeg: {err}"))
                 prog.advance(task)
-                continue
+                return
 
             if src_info["has_cover"]:
                 embed_cover_art(src, opus)
@@ -630,16 +654,18 @@ examples:
                     )
                     if opus.exists():
                         opus.unlink()
-                    stats["failed"] += 1
-                    failures.append((src, "; ".join(issues)))
+                    with lock:
+                        stats["failed"] += 1
+                        failures.append((src, "; ".join(issues)))
                     prog.advance(task)
-                    continue
+                    return
 
             opus_size = opus.stat().st_size
             delta     = src_size - opus_size
             ratio     = opus_size / src_size * 100 if src_size else 0
-            stats["saved"] += delta
-            stats["converted"] += 1
+            with lock:
+                stats["saved"] += delta
+                stats["converted"] += 1
 
             cov_tag  = " [dim]🖼[/dim]" if src_info["has_cover"] else ""
             size_str = (
@@ -649,7 +675,8 @@ examples:
 
             if not args.keep_originals:
                 src.unlink()
-                stats["deleted"] += 1
+                with lock:
+                    stats["deleted"] += 1
                 prog.print(
                     f"  [green]✓[/green]  {name}{cov_tag}  {size_str}"
                 )
@@ -660,6 +687,25 @@ examples:
                 )
 
             prog.advance(task)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futs = {executor.submit(process_one, src): src for src in src_files}
+            for fut in concurrent.futures.as_completed(futs):
+                if interrupted:
+                    for f in futs:
+                        f.cancel()
+                    prog.print("  [yellow]⚡ Interrupted by user.[/yellow]")
+                    break
+                try:
+                    fut.result()
+                except Exception as exc:
+                    src = futs[fut]
+                    prog.print(
+                        f"  [red]✗[/red]  {escape(src.name)}  "
+                        f"[red]Unexpected error: {exc}[/red]"
+                    )
+                    with lock:
+                        stats["failed"] += 1
 
     console.print()
     console.print(Rule("[bold]Summary[/bold]"))

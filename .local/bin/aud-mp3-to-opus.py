@@ -16,6 +16,7 @@ Usage:
     aud-mp3-to-opus --keep-originals ~/Music/
     aud-mp3-to-opus --list                       # pick subdirs of current directory
     aud-mp3-to-opus --list ~/Music/              # pick subdirs of ~/Music/
+    aud-mp3-to-opus --workers 4 ~/Music/         # convert 4 files at a time
 """
 
 import sys
@@ -24,6 +25,8 @@ import subprocess
 import argparse
 import signal
 import base64
+import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -258,16 +261,12 @@ def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
             if id3_key not in snap:
                 continue
 
-
             src_val = str(snap[id3_key]).strip()
-
 
             dst_val = ""
             if vorbis_key in tags:
                 v = tags[vorbis_key]
-
                 dst_val = str(v[0]).strip() if isinstance(v, list) else str(v).strip()
-
 
             if src_val.lower() != dst_val.lower():
                 issues.append(
@@ -420,6 +419,7 @@ examples:
   aud-mp3-to-opus --keep-originals --no-verify ~/Music/
   aud-mp3-to-opus --list                       # browse & pick subdirs of current dir
   aud-mp3-to-opus --list ~/Music/              # browse & pick subdirs of ~/Music/
+  aud-mp3-to-opus --workers 4 ~/Music/         # convert 4 files in parallel
         """,
     )
     parser.add_argument("folders", nargs="*", type=Path,
@@ -438,6 +438,10 @@ examples:
                         help="Skip MP3 if a .opus sibling already exists (default: on)")
     parser.add_argument("--no-skip-existing", dest="skip_existing", action="store_false",
                         help="Re-convert even if .opus already exists")
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 4,
+                        metavar="N",
+                        help="Number of files to convert in parallel "
+                             f"(default: number of CPU cores, currently {os.cpu_count() or 4})")
     args = parser.parse_args()
 
     # ── --list mode ───────────────────────────────────────────────────────────
@@ -451,16 +455,20 @@ examples:
         args.folders = [Path.cwd()]
 
     interrupted = False
-    current_opus: Optional[Path] = None
+    lock = threading.Lock()
+    _active_opus: set[Path] = set()
 
     def _sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
-        if current_opus is not None and current_opus.exists():
-            try:
-                current_opus.unlink()
-            except OSError:
-                pass
+        with lock:
+            to_clean = set(_active_opus)
+        for p in to_clean:
+            if p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
     signal.signal(signal.SIGINT, _sigint)
 
@@ -515,6 +523,8 @@ examples:
     failures: List[Tuple[Path, str]] = []
 
     console.print(Rule("[bold]Converting[/bold]"))
+    if args.workers > 1:
+        console.print(f"  [dim]Running {args.workers} workers in parallel[/dim]")
     console.print()
 
     with Progress(
@@ -531,25 +541,27 @@ examples:
             total=len(mp3_files),
         )
 
-        for mp3 in mp3_files:
+        def process_one(mp3: Path) -> None:
             if interrupted:
-                prog.print("  [yellow]⚡ Interrupted by user.[/yellow]")
-                break
+                prog.advance(task)
+                return
 
             opus = mp3.with_suffix(".opus")
             name = escape(mp3.name)
 
-            label = name[:52] + "…" if len(name) > 53 else name
-            prog.update(task, description=f"[dim]{label}[/dim]")
+            if args.workers == 1:
+                label = name[:52] + "…" if len(name) > 53 else name
+                prog.update(task, description=f"[dim]{label}[/dim]")
 
             if args.skip_existing and opus.exists():
                 mp3_info = get_mp3_info(mp3)
                 valid, _ = verify(mp3, opus, mp3_info)
                 if valid:
                     prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
-                    stats["skipped"] += 1
+                    with lock:
+                        stats["skipped"] += 1
                     prog.advance(task)
-                    continue
+                    return
                 else:
                     prog.print(
                         f"  [yellow]⚠[/yellow]  [dim]{name}[/dim]  "
@@ -562,15 +574,23 @@ examples:
             kbps     = target_bitrate(mp3_info["bitrate_kbps"])
             mp3_size = mp3.stat().st_size
 
-            current_opus = opus
+            with lock:
+                _active_opus.add(opus)
             ok, err = convert(mp3, opus, kbps)
-            current_opus = None
+            with lock:
+                _active_opus.discard(opus)
+
+            if interrupted and not ok:
+                prog.advance(task)
+                return
+
             if not ok:
                 prog.print(f"  [red]✗ FAIL[/red]  [dim]{name}[/dim]  [red]{err}[/red]")
-                stats["failed"] += 1
-                failures.append((mp3, f"ffmpeg: {err}"))
+                with lock:
+                    stats["failed"] += 1
+                    failures.append((mp3, f"ffmpeg: {err}"))
                 prog.advance(task)
-                continue
+                return
 
             if mp3_info["has_cover"]:
                 embed_cover_art(mp3, opus)
@@ -584,16 +604,18 @@ examples:
                     )
                     if opus.exists():
                         opus.unlink()
-                    stats["failed"] += 1
-                    failures.append((mp3, "; ".join(issues)))
+                    with lock:
+                        stats["failed"] += 1
+                        failures.append((mp3, "; ".join(issues)))
                     prog.advance(task)
-                    continue
+                    return
 
             opus_size = opus.stat().st_size
             delta     = mp3_size - opus_size
             ratio     = opus_size / mp3_size * 100 if mp3_size else 0
-            stats["saved"] += delta
-            stats["converted"] += 1
+            with lock:
+                stats["saved"] += delta
+                stats["converted"] += 1
 
             cov_tag = " [dim]🖼[/dim]" if mp3_info["has_cover"] else ""
             size_str = (
@@ -604,7 +626,8 @@ examples:
 
             if not args.keep_originals:
                 mp3.unlink()
-                stats["deleted"] += 1
+                with lock:
+                    stats["deleted"] += 1
                 prog.print(
                     f"  [green]✓[/green]  {name}{cov_tag}  "
                     f"{br_str}  {size_str}"
@@ -616,6 +639,25 @@ examples:
                 )
 
             prog.advance(task)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futs = {executor.submit(process_one, mp3): mp3 for mp3 in mp3_files}
+            for fut in concurrent.futures.as_completed(futs):
+                if interrupted:
+                    for f in futs:
+                        f.cancel()
+                    prog.print("  [yellow]⚡ Interrupted by user.[/yellow]")
+                    break
+                try:
+                    fut.result()
+                except Exception as exc:
+                    mp3 = futs[fut]
+                    prog.print(
+                        f"  [red]✗[/red]  {escape(mp3.name)}  "
+                        f"[red]Unexpected error: {exc}[/red]"
+                    )
+                    with lock:
+                        stats["failed"] += 1
 
     console.print()
     console.print(Rule("[bold]Summary[/bold]"))

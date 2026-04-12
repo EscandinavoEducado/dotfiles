@@ -27,12 +27,23 @@
   },
   "puddlestuff.functions_replaceWithReg": {
     "arguments": [
-      ".*?(19\\d{2}|20\\d{2}).*",
-      "$1",
+      "\\\\\\\\",
+      " / ",
       false
     ],
     "fields": [
-      "year"
+      "artist"
+    ]
+  },
+  "puddlestuff.functions_replace": {
+    "arguments": [
+      "\\\\",
+      " / ",
+      false,
+      false
+    ],
+    "fields": [
+      "artist"
     ]
   }
 }

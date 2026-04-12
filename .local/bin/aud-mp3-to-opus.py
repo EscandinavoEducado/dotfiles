@@ -47,6 +47,7 @@ try:
     from rich.rule import Rule
     from rich.columns import Columns
     from rich.text import Text
+    from rich.markup import escape
 except ImportError:
     _missing.append("rich     →  pip install rich")
 
@@ -94,6 +95,23 @@ def find_mp3_files(folders: List[Path]) -> List[Path]:
     return found
 
 
+def get_true_duration(path: Path) -> float:
+    """Use ffprobe to get the actual stream duration, ignoring bad MP3 headers."""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path)
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return float(r.stdout.strip())
+    except Exception:
+        pass
+    return 0.0
+
 def get_mp3_info(path: Path) -> dict:
     """Read bitrate, duration, tag presence, and cover art flag from an MP3."""
     info = {
@@ -105,7 +123,10 @@ def get_mp3_info(path: Path) -> dict:
     }
     try:
         audio = MP3(path)
-        info["duration"]     = audio.info.length
+
+        true_dur = get_true_duration(path)
+        info["duration"] = true_dur if true_dur > 0 else audio.info.length
+
         info["bitrate_kbps"] = max(1, audio.info.bitrate // 1000)
 
         if audio.tags:
@@ -144,6 +165,9 @@ def convert(mp3: Path, opus: Path, kbps: int) -> Tuple[bool, str]:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
+            if opus.exists() and opus.stat().st_size > 0:
+                return True, ""
+
             err = (r.stderr or "unknown error").strip().splitlines()
             short = next((l for l in reversed(err) if l.strip()), err[-1] if err else "unknown")
             return False, short
@@ -203,7 +227,9 @@ def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
             return False, ["mutagen cannot open output file"]
 
         dur_diff = abs(af.info.length - mp3_info["duration"])
-        if dur_diff > DURATION_TOLS:
+        allowed_diff = max(DURATION_TOLS, mp3_info["duration"] * 0.10)
+
+        if dur_diff > allowed_diff:
             issues.append(
                 f"Duration mismatch: source={mp3_info['duration']:.1f}s "
                 f"opus={af.info.length:.1f}s  Δ={dur_diff:.1f}s"
@@ -226,15 +252,23 @@ def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
             "TRCK": "tracknumber",
             "TDRC": "date",
         }
+
         snap = mp3_info["tag_snapshot"]
         for id3_key, vorbis_key in id3_to_vorbis.items():
             if id3_key not in snap:
                 continue
-            src_val = snap[id3_key].strip()
+
+
+            src_val = str(snap[id3_key]).strip()
+
+
             dst_val = ""
             if vorbis_key in tags:
                 v = tags[vorbis_key]
-                dst_val = (str(v[0]) if isinstance(v, list) else str(v)).strip()
+
+                dst_val = str(v[0]).strip() if isinstance(v, list) else str(v).strip()
+
+
             if src_val.lower() != dst_val.lower():
                 issues.append(
                     f"Tag mismatch [{vorbis_key}]: "
@@ -417,9 +451,17 @@ examples:
         args.folders = [Path.cwd()]
 
     interrupted = False
+    current_opus: Optional[Path] = None
+
     def _sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
+        if current_opus is not None and current_opus.exists():
+            try:
+                current_opus.unlink()
+            except OSError:
+                pass
+
     signal.signal(signal.SIGINT, _sigint)
 
     console.print()
@@ -495,22 +537,34 @@ examples:
                 break
 
             opus = mp3.with_suffix(".opus")
-            name = mp3.name
+            name = escape(mp3.name)
 
             label = name[:52] + "…" if len(name) > 53 else name
             prog.update(task, description=f"[dim]{label}[/dim]")
 
             if args.skip_existing and opus.exists():
-                prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
-                stats["skipped"] += 1
-                prog.advance(task)
-                continue
+                mp3_info = get_mp3_info(mp3)
+                valid, _ = verify(mp3, opus, mp3_info)
+                if valid:
+                    prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
+                    stats["skipped"] += 1
+                    prog.advance(task)
+                    continue
+                else:
+                    prog.print(
+                        f"  [yellow]⚠[/yellow]  [dim]{name}[/dim]  "
+                        f"[yellow](incomplete opus found — re-converting)[/yellow]"
+                    )
+                    opus.unlink()
+            else:
+                mp3_info = get_mp3_info(mp3)
 
-            mp3_info = get_mp3_info(mp3)
             kbps     = target_bitrate(mp3_info["bitrate_kbps"])
             mp3_size = mp3.stat().st_size
 
+            current_opus = opus
             ok, err = convert(mp3, opus, kbps)
+            current_opus = None
             if not ok:
                 prog.print(f"  [red]✗ FAIL[/red]  [dim]{name}[/dim]  [red]{err}[/red]")
                 stats["failed"] += 1

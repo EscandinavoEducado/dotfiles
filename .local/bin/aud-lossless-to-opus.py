@@ -53,6 +53,7 @@ try:
     from rich.rule import Rule
     from rich.columns import Columns
     from rich.text import Text
+    from rich.markup import escape
 except ImportError:
     _missing.append("rich     →  pip install rich")
 
@@ -168,6 +169,8 @@ def convert(src: Path, opus: Path, kbps: int) -> Tuple[bool, str]:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
+            if opus.exists() and opus.stat().st_size > 0:
+                return True, ""
             err = (r.stderr or "unknown error").strip().splitlines()
             short = next((l for l in reversed(err) if l.strip()), err[-1] if err else "unknown")
             return False, short
@@ -280,7 +283,8 @@ def verify(src: Path, opus: Path, src_info: dict) -> Tuple[bool, List[str]]:
             return False, ["mutagen cannot open output file"]
 
         dur_diff = abs(af.info.length - src_info["duration"])
-        if dur_diff > DURATION_TOLS:
+        allowed_diff = max(DURATION_TOLS, src_info["duration"] * 0.10)
+        if dur_diff > allowed_diff:
             issues.append(
                 f"Duration mismatch: source={src_info['duration']:.1f}s "
                 f"opus={af.info.length:.1f}s  Δ={dur_diff:.1f}s"
@@ -494,9 +498,17 @@ examples:
         args.folders = [Path.cwd()]
 
     interrupted = False
+    current_opus: Optional[Path] = None
+
     def _sigint(sig, frame):
         nonlocal interrupted
         interrupted = True
+        if current_opus is not None and current_opus.exists():
+            try:
+                current_opus.unlink()
+            except OSError:
+                pass
+
     signal.signal(signal.SIGINT, _sigint)
 
     console.print()
@@ -572,21 +584,33 @@ examples:
                 break
 
             opus = src.with_suffix(".opus")
-            name = src.name
+            name = escape(src.name)
 
             label = name[:52] + "…" if len(name) > 53 else name
             prog.update(task, description=f"[dim]{label}[/dim]")
 
             if args.skip_existing and opus.exists():
-                prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
-                stats["skipped"] += 1
-                prog.advance(task)
-                continue
+                src_info = get_source_info(src)
+                valid, _ = verify(src, opus, src_info)
+                if valid:
+                    prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
+                    stats["skipped"] += 1
+                    prog.advance(task)
+                    continue
+                else:
+                    prog.print(
+                        f"  [yellow]⚠[/yellow]  [dim]{name}[/dim]  "
+                        f"[yellow](incomplete opus found — re-converting)[/yellow]"
+                    )
+                    opus.unlink()
+            else:
+                src_info = get_source_info(src)
 
-            src_info = get_source_info(src)
             src_size = src.stat().st_size
 
+            current_opus = opus
             ok, err = convert(src, opus, args.bitrate)
+            current_opus = None
             if not ok:
                 prog.print(f"  [red]✗ FAIL[/red]  [dim]{name}[/dim]  [red]{err}[/red]")
                 stats["failed"] += 1

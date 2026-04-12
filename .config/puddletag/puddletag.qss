@@ -1,0 +1,4 @@
+QTableView::item:selected {
+    background-color: #3b4252;
+    color: #eceff4;
+}

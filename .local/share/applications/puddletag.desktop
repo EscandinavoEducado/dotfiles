@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=puddletag
+TryExec=puddletag
+MimeType=inode/directory;audio/x-ape;audio/x-wavpack;audio/x-musepack;audio/mpeg;audio/x-aiff;audio/x-dsf;audio/x-dff;audio/mp4;audio/x-m4a;video/mp4;video/x-m4v;audio/ogg;audio/flac;audio/x-opus+ogg;audio/x-ms-wma;video/x-ms-wmv;video/x-ms-asf;
+Exec=puddletag -stylesheet /home/salty/.config/puddletag/puddletag.qss %F
+Icon=puddletag
+GenericName=Audio Tag Editor
+Categories=AudioVideo;Audio;Qt;
+Keywords=tagger;mp3tag;music;

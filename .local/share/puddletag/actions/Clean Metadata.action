@@ -11,5 +11,25 @@
     "arguments": [
       "artist;album;title;track;year;discnumber;albumartist;__image"
     ]
+  },
+  "Func1": {
+    "fields": [
+      "track"
+    ],
+    "func_name": "formatValue",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "$num(%track%,1)"
+    ]
+  },
+  "Func2": {
+    "fields": [
+      "year"
+    ],
+    "func_name": "formatValue",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "$num(%year%,1)"
+    ]
   }
 }

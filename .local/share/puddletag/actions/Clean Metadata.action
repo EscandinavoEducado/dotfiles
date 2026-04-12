@@ -1,0 +1,15 @@
+{
+  "info": {
+    "name": "Clean Metadata"
+  },
+  "Func0": {
+    "fields": [
+      "just nothing to do with this"
+    ],
+    "func_name": "remove_except",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "artist;album;title;track;year;discnumber;albumartist;__image"
+    ]
+  }
+}

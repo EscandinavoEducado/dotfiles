@@ -1,0 +1,20 @@
+{
+  "puddlestuff.functions_autonumbering": {
+    "arguments": [
+      1,
+      false,
+      1
+    ],
+    "fields": [
+      "__selected"
+    ]
+  },
+  "puddlestuff.functions_remove_except": {
+    "arguments": [
+      "artist;album;title;track;year;discnumber;albumartist;__image"
+    ],
+    "fields": [
+      "just nothing to do with this"
+    ]
+  }
+}

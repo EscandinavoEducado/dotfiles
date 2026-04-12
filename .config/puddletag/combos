@@ -1,0 +1,21 @@
+{
+  "For &Mixed Case, after any of:": {
+    "values": [
+      "., !"
+    ]
+  },
+  "filter_text": {
+    "values": [
+      "",
+      ""
+    ]
+  },
+  "&Field list (; separated):": {
+    "values": [
+      "",
+      "artist;album;title;track;year;discnumber;albumartist;image",
+      "artist;album;title;track;year;discnumber;albumartist;_image",
+      "artist;album;title;track;year;discnumber;albumartist;__image"
+    ]
+  }
+}

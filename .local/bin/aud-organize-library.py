@@ -3,6 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "mutagen",
+#   "Pillow",
 # ]
 # ///
 """
@@ -11,16 +12,21 @@ aud-organize-library — Scan, rename, and organize audio library folders.
 Usage:
     aud-organize-library                        # scan current directory
     aud-organize-library ~/Music/
+    aud-organize-library --list                 # pick subdirs interactively
+    aud-organize-library --list ~/Music/        # pick from ~/Music subdirs
     aud-organize-library -p ~/Music/            # interactive web preview
     aud-organize-library -c ~/Music/            # check only, no changes
     aud-organize-library -y ~/Music/            # auto-confirm everything
-    aud-organize-library --folder-only ~/Music/ # skip file renaming
+    aud-organize-library --cover-size ~/Music/  # resize embedded covers > 700px
 """
 
 import os
 import re
 import sys
+import io
+import base64
 import hashlib
+import shutil
 import webbrowser
 import html
 import threading
@@ -37,9 +43,17 @@ except ImportError:
     print("Please install it by running: pip install mutagen")
     sys.exit(1)
 
+try:
+    from PIL import Image
+except ImportError:
+    print("Error: The 'Pillow' library is required.")
+    print("Please install it by running: pip install Pillow")
+    sys.exit(1)
+
 SUPPORTED_EXTENSIONS       = ('.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav')
 SUPPORTED_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff')
-STANDARD_AUDIO_FORMATS     = ('.mp3', '.flac')
+STANDARD_AUDIO_FORMATS     = ('.opus', '.flac')
+COVER_MAX_SIZE             = 700
 PATH_LENGTH_LIMIT_BYTES    = 230
 FILE_NAME_RESERVE_BYTES    = 20
 
@@ -63,6 +77,104 @@ class Color:
 
 if not sys.stdout.isatty():
     Color.disable()
+
+
+def get_subdirs(base):
+    """Return sorted list of immediate (non-hidden) subdirectories of *base*."""
+    try:
+        return sorted(
+            (p for p in os.scandir(base)
+             if p.is_dir() and not p.name.startswith(".")),
+            key=lambda e: e.name.lower(),
+        )
+    except PermissionError:
+        print(f"{Color.RED}✗ Permission denied: {base}{Color.ENDC}")
+        return []
+
+
+def parse_selection(raw, max_idx):
+    """Parse "1 3 5-8 10" into a sorted list of 0-based indices."""
+    indices = set()
+    for token in raw.replace(",", " ").split():
+        if "-" in token:
+            parts = token.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except ValueError:
+                print(f"{Color.RED}  ✗ Invalid range: {token}{Color.ENDC}")
+                return []
+            if lo < 1 or hi > max_idx or lo > hi:
+                print(f"{Color.RED}  ✗ Range {token} out of bounds (1–{max_idx}){Color.ENDC}")
+                return []
+            indices.update(range(lo - 1, hi))
+        else:
+            try:
+                n = int(token)
+            except ValueError:
+                print(f"{Color.RED}  ✗ Not a number: {token}{Color.ENDC}")
+                return []
+            if n < 1 or n > max_idx:
+                print(f"{Color.RED}  ✗ Number {n} out of bounds (1–{max_idx}){Color.ENDC}")
+                return []
+            indices.add(n - 1)
+    return sorted(indices)
+
+
+def print_dir_grid(entries):
+    """Print numbered subdirectories in a compact two-column grid."""
+    if not entries:
+        print(f"  {Color.YELLOW}No subdirectories found.{Color.ENDC}")
+        return
+    num_w  = len(str(len(entries)))
+    col_w  = max(len(e.name) for e in entries) + num_w + 4
+    n_cols = max(1, min(2, shutil.get_terminal_size(fallback=(80, 24)).columns // col_w))
+    n_rows = -(-len(entries) // n_cols)
+    for row in range(n_rows):
+        line = ""
+        for col in range(n_cols):
+            idx = row + col * n_rows
+            if idx >= len(entries):
+                break
+            pad = col_w - (num_w + 2 + len(entries[idx].name))
+            line += f"{Color.CYAN}{idx + 1:>{num_w}}{Color.ENDC}  {Color.BOLD}{entries[idx].name}{Color.ENDC}" + " " * pad
+        print("  " + line)
+
+
+def list_and_select(base):
+    """Show a numbered grid of subdirs under *base*, prompt for selection,
+    return chosen directory paths as strings."""
+    entries = get_subdirs(base)
+    print()
+    print(f"{Color.CYAN}{Color.BOLD}Select directories{Color.ENDC}  {Color.CYAN}{base}{Color.ENDC}")
+    print()
+    if not entries:
+        print(f"  {Color.YELLOW}No subdirectories found.{Color.ENDC}")
+        print()
+        return []
+    print_dir_grid(entries)
+    print()
+    print(f"  {Color.YELLOW}Enter numbers, ranges, or both — e.g. 1 3 5-8  (space or comma separated){Color.ENDC}")
+    print()
+    while True:
+        try:
+            raw = input("  Selection: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print(f"  {Color.YELLOW}Cancelled.{Color.ENDC}")
+            sys.exit(0)
+        if not raw:
+            print(f"  {Color.YELLOW}Nothing selected. Exiting.{Color.ENDC}")
+            sys.exit(0)
+        idxs = parse_selection(raw, len(entries))
+        if idxs:
+            chosen = [entries[i].path for i in idxs]
+            print()
+            label = "directory" if len(chosen) == 1 else "directories"
+            print(f"  {Color.GREEN}●{Color.ENDC} Selected {Color.BOLD}{len(chosen)}{Color.ENDC} {label}:")
+            for d in chosen:
+                print(f"    {Color.CYAN}•{Color.ENDC} {d}")
+            print()
+            return chosen
 
 
 def sanitize_filename(name: str, is_path_component: bool = False) -> str:
@@ -117,25 +229,148 @@ def get_audio_metadata(file_path: str) -> Tuple[Optional[Dict[str, str]], Option
         return None, f"Could not read metadata from {os.path.basename(file_path)}: {e}"
 
 
-def get_cover_art_info(file_path: str) -> Tuple[int, Optional[str]]:
+def get_cover_art_info(file_path: str) -> Tuple[int, Optional[str], int, int]:
+    """Returns (count, md5_hash, width, height). Width/height are 0 if unreadable."""
+    def _dims(data: bytes) -> Tuple[int, int]:
+        try:
+            img = Image.open(io.BytesIO(data))
+            return img.size  # (width, height)
+        except Exception:
+            return 0, 0
+
     try:
         audio = MutagenFile(file_path)
         if not audio:
-            return 0, None
-        pictures = []
+            return 0, None, 0, 0
+
+        # OggOpus / Vorbis: cover art is a base64-encoded FLAC Picture block
+        tags = audio.tags or {}
+        mbp = tags.get('metadata_block_picture') or tags.get('METADATA_BLOCK_PICTURE')
+        if mbp:
+            from mutagen.flac import Picture
+            try:
+                pic = Picture(base64.b64decode(mbp[0]))
+                w, h = _dims(pic.data)
+                return len(mbp), hashlib.md5(pic.data).hexdigest(), w, h
+            except Exception:
+                pass
+
+        # FLAC native picture list
         if hasattr(audio, 'pictures') and audio.pictures:
             pictures = audio.pictures
-        elif 'APIC:' in audio:
-            pictures = audio.tags.getall('APIC:')
-        elif 'covr' in audio:
-            pictures = audio['covr']
+            pic_data = pictures[0].data
+            w, h = _dims(pic_data)
+            return len(pictures), hashlib.md5(pic_data).hexdigest(), w, h
 
-        if pictures:
-            pic_data = pictures[0].data if hasattr(pictures[0], 'data') else pictures[0]
-            return len(pictures), hashlib.md5(pic_data).hexdigest()
-        return 0, None
+        # ID3 (MP3): APIC frame
+        if hasattr(audio, 'tags') and audio.tags and 'APIC:' in audio.tags:
+            pictures = audio.tags.getall('APIC:')
+            w, h = _dims(pictures[0].data)
+            return len(pictures), hashlib.md5(pictures[0].data).hexdigest(), w, h
+
+        # MP4/M4A: covr atom
+        if 'covr' in (audio.tags or {}):
+            pictures = audio['covr']
+            raw = bytes(pictures[0])
+            w, h = _dims(raw)
+            return len(pictures), hashlib.md5(raw).hexdigest(), w, h
+
+        return 0, None, 0, 0
     except Exception:
-        return 0, None
+        return 0, None, 0, 0
+
+
+def _resize_image_bytes(data: bytes, mime: str, max_size: int) -> Tuple[bytes, str, int, int]:
+    """
+    Resize *data* so its longest side is at most *max_size* px.
+    Returns (new_bytes, mime, new_width, new_height).
+    Raises if the image cannot be decoded or is already within limits.
+    """
+    img = Image.open(io.BytesIO(data))
+    w, h = img.size
+    if max(w, h) <= max_size:
+        raise ValueError("already within limits")
+    scale  = max_size / max(w, h)
+    new_w  = max(1, int(w * scale))
+    new_h  = max(1, int(h * scale))
+    img    = img.resize((new_w, new_h), Image.BILINEAR)
+    buf    = io.BytesIO()
+    fmt    = 'JPEG' if mime in ('image/jpeg', 'image/jpg') else 'PNG'
+    out_mime = 'image/jpeg' if fmt == 'JPEG' else 'image/png'
+    if fmt == 'JPEG':
+        img.convert('RGB').save(buf, format='JPEG', quality=90)
+    else:
+        img.save(buf, format='PNG')
+    return buf.getvalue(), out_mime, new_w, new_h
+
+
+def _write_cover_to_file(file_path: str, pic_data: bytes, mime: str, width: int, height: int) -> bool:
+    """Write pre-resized cover bytes into the audio file's embedded tag."""
+    try:
+        from mutagen.flac import Picture
+        audio = MutagenFile(file_path)
+        if not audio:
+            return False
+
+        tags = audio.tags or {}
+
+        # OggOpus / Vorbis
+        mbp_key = None
+        for key in ('metadata_block_picture', 'METADATA_BLOCK_PICTURE'):
+            if key in tags:
+                mbp_key = key
+                break
+
+        if mbp_key:
+            orig = Picture(base64.b64decode(tags[mbp_key][0]))
+            orig.data   = pic_data
+            orig.mime   = mime
+            orig.width  = width
+            orig.height = height
+            audio.tags[mbp_key] = [base64.b64encode(orig.write()).decode('ascii')]
+            audio.save()
+            return True
+
+        # FLAC native
+        if hasattr(audio, 'pictures') and audio.pictures:
+            pic         = audio.pictures[0]
+            pic.data    = pic_data
+            pic.mime    = mime
+            pic.width   = width
+            pic.height  = height
+            audio.clear_pictures()
+            audio.add_picture(pic)
+            audio.save()
+            return True
+
+        return False
+
+    except Exception as e:
+        print(f"  {Color.RED}Error writing cover to {os.path.basename(file_path)}: {e}{Color.ENDC}")
+        return False
+
+
+def _read_raw_cover(file_path: str):
+    """
+    Return (raw_bytes, mime) for the first embedded cover in *file_path*,
+    or (None, None) if not found.
+    """
+    try:
+        from mutagen.flac import Picture
+        audio = MutagenFile(file_path)
+        if not audio:
+            return None, None
+        tags = audio.tags or {}
+        for key in ('metadata_block_picture', 'METADATA_BLOCK_PICTURE'):
+            if key in tags:
+                pic = Picture(base64.b64decode(tags[key][0]))
+                return pic.data, pic.mime
+        if hasattr(audio, 'pictures') and audio.pictures:
+            pic = audio.pictures[0]
+            return pic.data, pic.mime
+    except Exception:
+        pass
+    return None, None
 
 
 def flatten_container_folder(dirpath: str, dirnames: List[str], general_warnings: List[str]) -> bool:
@@ -178,8 +413,9 @@ def analyze_album_folder(dirpath: str, filenames: List[str]) -> Optional[Dict]:
         if warn:
             album_warnings.append(warn)
         if md:
-            count, hash_val = get_cover_art_info(path)
-            md.update({'cover_art_count': count, 'cover_art_hash': hash_val})
+            count, hash_val, cov_w, cov_h = get_cover_art_info(path)
+            md.update({'cover_art_count': count, 'cover_art_hash': hash_val,
+                       'cover_art_w': cov_w, 'cover_art_h': cov_h})
             files_metadata.append(md)
 
     if not files_metadata:
@@ -260,6 +496,13 @@ def check_warnings(info: Dict) -> List[str]:
     if any(count > 1 for count in Counter([(m.get('track'), m.get('disc')) for m in md_list if m.get('track')]).values()):
         warnings.add("[Duplicate Track]")
 
+    oversized = [(m.get('cover_art_w', 0), m.get('cover_art_h', 0))
+                 for m in md_list
+                 if max(m.get('cover_art_w', 0), m.get('cover_art_h', 0)) > COVER_MAX_SIZE]
+    if oversized:
+        w, h = max(oversized, key=lambda s: max(s[0], s[1]))
+        warnings.add(f"[Large Cover {w}×{h}]")
+
     return sorted(list(warnings))
 
 
@@ -306,7 +549,7 @@ def plan_renames(info: Dict, final_name: str, ignore_disc: bool) -> List[Tuple[s
     return plan
 
 
-def run_scan_and_plan(root_folder: str, options: Dict):
+def run_scan_and_plan(root_folders: List[str], options: Dict):
     check_only  = options.get('check_only', False)
     force_yes   = options.get('force_yes', False)
     force_no    = options.get('force_no', False)
@@ -319,61 +562,71 @@ def run_scan_and_plan(root_folder: str, options: Dict):
 
     print(f"{Color.HEADER}{Color.BOLD}--- Phase 1: Analyzing Folders ---{Color.ENDC}")
 
-    for dirpath, dirnames, filenames in os.walk(root_folder):
-        if dirpath == root_folder:
-            continue
+    for root_folder in root_folders:
+        for dirpath, dirnames, filenames in os.walk(root_folder):
+            if dirpath == root_folder:
+                continue
 
-        is_container = False
-        if dirnames:
-            for sub in dirnames:
-                try:
-                    if any(f.lower().endswith(SUPPORTED_EXTENSIONS) for f in os.listdir(os.path.join(dirpath, sub))):
-                        is_container = True
-                        break
-                except:
-                    continue
-
-        if is_container:
-            if not interactive:
-                choice = 'y' if force_yes else 'n'
-            else:
-                choice = 'n' if check_only or force_no else 'y' if force_yes else ''
-                if not choice:
+            is_container = False
+            if dirnames:
+                for sub in dirnames:
                     try:
-                        choice = input(f"\n{Color.YELLOW}Container '{os.path.basename(dirpath)}' found. Flatten? (y/n): {Color.ENDC}").lower()
+                        if any(f.lower().endswith(SUPPORTED_EXTENSIONS) for f in os.listdir(os.path.join(dirpath, sub))):
+                            is_container = True
+                            break
                     except:
-                        choice = 'n'
+                        continue
 
-            if choice == 'y':
-                if flatten_container_folder(dirpath, dirnames, general_warnings):
-                    dirnames[:], filenames = [], os.listdir(dirpath)
-                    info = analyze_album_folder(dirpath, filenames)
-                    if info:
-                        folder_info.append(info)
-            else:
-                general_warnings.append(f"[Container Skipped] {os.path.basename(dirpath)}")
-                dirnames[:] = []
-            continue
+            if is_container:
+                if not interactive:
+                    choice = 'y' if force_yes else 'n'
+                else:
+                    choice = 'n' if check_only or force_no else 'y' if force_yes else ''
+                    if not choice:
+                        try:
+                            choice = input(f"\n{Color.YELLOW}Container '{os.path.basename(dirpath)}' found. Flatten? (y/n): {Color.ENDC}").lower()
+                        except:
+                            choice = 'n'
 
-        info = analyze_album_folder(dirpath, filenames)
-        if info:
-            folder_info.append(info)
+                if choice == 'y':
+                    if flatten_container_folder(dirpath, dirnames, general_warnings):
+                        dirnames[:], filenames = [], os.listdir(dirpath)
+                        info = analyze_album_folder(dirpath, filenames)
+                        if info:
+                            folder_info.append(info)
+                else:
+                    general_warnings.append(f"[Container Skipped] {os.path.basename(dirpath)}")
+                    dirnames[:] = []
+                continue
+
+            info = analyze_album_folder(dirpath, filenames)
+            if info:
+                folder_info.append(info)
 
     print(f"\n{Color.HEADER}{Color.BOLD}--- Phase 2: Planning ---{Color.ENDC}")
 
-    counts = Counter(i['album'].lower() for i in folder_info if i['album'])
-    dupes  = {name for name, c in counts.items() if c > 1}
+    # Duplicates are only meaningful within the same parent directory.
+    # Two artists each having "Greatest Hits" is not a conflict.
+    counts = Counter(
+        (os.path.dirname(i['path']), i['album'].lower())
+        for i in folder_info if i['album']
+    )
+    dupes = {(parent, name) for (parent, name), c in counts.items() if c > 1}
 
     for info in folder_info:
         info['base_name'] = sanitize_filename(info['album'])
-        if info['album'] and info['album'].lower() in dupes and info['year']:
+        parent = os.path.dirname(info['path'])
+        if info['album'] and (parent, info['album'].lower()) in dupes and info['year']:
             info['base_name'] += f" ({info['year']})"
 
-    base_counts = Counter(i['base_name'] for i in folder_info)
-    needs_num   = {n for n, c in base_counts.items() if c > 1}
-    counters    = Counter()
+    base_counts = Counter(
+        (os.path.dirname(i['path']), i['base_name'])
+        for i in folder_info
+    )
+    needs_num = {(parent, name) for (parent, name), c in base_counts.items() if c > 1}
+    counters  = Counter()
 
-    folder_rename_plan, file_rename_plan, tag_plan = [], [], []
+    folder_rename_plan, file_rename_plan, tag_plan, cover_resize_plan = [], [], [], []
     preview_data   = []
     proposed_paths = set()
     folder_info.sort(key=lambda x: x['path'])
@@ -387,9 +640,10 @@ def run_scan_and_plan(root_folder: str, options: Dict):
         budget = PATH_LENGTH_LIMIT_BYTES - len(parent.encode('utf-8')) - 1 - FILE_NAME_RESERVE_BYTES - len(year_suffix.encode('utf-8')) - 6
         final_base = truncate_to_budget(pure_base, max(1, budget)) + year_suffix
 
-        if final_base in needs_num or counters[final_base] > 0:
-            final_name = f"{final_base} ({counters[final_base] + 1})"
-            counters[final_base] += 1
+        counter_key = (parent, final_base)
+        if counter_key in needs_num or counters[counter_key] > 0:
+            final_name = f"{final_base} ({counters[counter_key] + 1})"
+            counters[counter_key] += 1
         else:
             final_name = final_base
 
@@ -448,6 +702,13 @@ def run_scan_and_plan(root_folder: str, options: Dict):
         if w:
             warnings_by_album[final_name] = w
 
+        # Collect files with oversized covers: store (path, hash) so execute
+        # can group by hash and resize each unique image only once.
+        for m in info['files_metadata']:
+            if max(m.get('cover_art_w', 0), m.get('cover_art_h', 0)) > COVER_MAX_SIZE:
+                fpath = os.path.join(info['path'], m['filename'])
+                cover_resize_plan.append((fpath, m.get('cover_art_hash', '')))
+
         p_files_list = []
         for m in info['files_metadata']:
             orig = m['filename']
@@ -465,10 +726,10 @@ def run_scan_and_plan(root_folder: str, options: Dict):
         })
 
     stats = {'changed_albums': sum(1 for p in preview_data if p['has_changes'])}
-    return preview_data, file_rename_plan, folder_rename_plan, tag_plan, stats, general_warnings, warnings_by_album
+    return preview_data, file_rename_plan, folder_rename_plan, tag_plan, cover_resize_plan, stats, general_warnings, warnings_by_album
 
 
-def execute_changes(file_plan, folder_plan, tag_plan):
+def execute_changes(file_plan, folder_plan, tag_plan, cover_resize_plan=None, resize_covers=False):
     print(f"\n{Color.HEADER}{Color.BOLD}--- Phase 3: Executing ---{Color.ENDC}")
 
     if tag_plan:
@@ -508,6 +769,39 @@ def execute_changes(file_plan, folder_plan, tag_plan):
             except Exception as e:
                 print(f"  {Color.RED}Error: {e}{Color.ENDC}")
 
+    if resize_covers and cover_resize_plan:
+        print(f"\n{Color.BOLD}Step 4: Resizing oversized cover art (max {COVER_MAX_SIZE}px)...{Color.ENDC}")
+
+        # Group files by cover hash so each unique image is resized exactly once.
+        by_hash: Dict[str, List[str]] = {}
+        for path, cover_hash in cover_resize_plan:
+            if os.path.exists(path):
+                by_hash.setdefault(cover_hash or path, []).append(path)
+
+        written = 0
+        for cover_hash, paths in by_hash.items():
+            # Read and resize the cover image from the first file in the group.
+            raw, mime = _read_raw_cover(paths[0])
+            if raw is None:
+                continue
+            try:
+                new_data, new_mime, new_w, new_h = _resize_image_bytes(raw, mime or 'image/jpeg', COVER_MAX_SIZE)
+            except ValueError:
+                continue  # already within limits (shouldn't happen, but be safe)
+            except Exception as e:
+                print(f"  {Color.RED}Error resizing image: {e}{Color.ENDC}")
+                continue
+
+            # Write the pre-resized bytes to every file in the group.
+            for path in paths:
+                if _write_cover_to_file(path, new_data, new_mime, new_w, new_h):
+                    print(f"  {Color.GREEN}✓{Color.ENDC}  {os.path.basename(path)}")
+                    written += 1
+
+        unique = len(by_hash)
+        print(f"  Resized {unique} unique cover image{'s' if unique != 1 else ''}, "
+              f"written to {written} file{'s' if written != 1 else ''}.")
+
     print(f"{Color.GREEN}Done.{Color.ENDC}")
 
 
@@ -523,10 +817,17 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == '/apply':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_length)) if content_length else {}
+            resize_covers = body.get('resize_covers', False)
             self.send_response(200)
             self.end_headers()
             print(f"\n{Color.CYAN}[Web] Applying changes...{Color.ENDC}")
-            execute_changes(self.data['file_plan'], self.data['folder_plan'], self.data['tag_plan'])
+            execute_changes(
+                self.data['file_plan'], self.data['folder_plan'], self.data['tag_plan'],
+                cover_resize_plan=self.data['cover_resize_plan'],
+                resize_covers=resize_covers,
+            )
             threading.Thread(target=self.server.shutdown).start()
 
         elif self.path == '/shutdown':
@@ -539,8 +840,9 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
             print(f"\n{Color.BLUE}[Web] Re-checking files...{Color.ENDC}")
             opts = self.data['options'].copy()
             opts['interactive'] = False
-            p_data, f_plan, d_plan, t_plan, stats, _, _ = run_scan_and_plan(self.data['root'], opts)
-            self.data.update({'preview': p_data, 'file_plan': f_plan, 'folder_plan': d_plan, 'tag_plan': t_plan, 'stats': stats})
+            p_data, f_plan, d_plan, t_plan, cov_plan, stats, _, _ = run_scan_and_plan(self.data['roots'], opts)
+            self.data.update({'preview': p_data, 'file_plan': f_plan, 'folder_plan': d_plan,
+                              'tag_plan': t_plan, 'cover_resize_plan': cov_plan, 'stats': stats})
             self.send_response(200)
             self.end_headers()
             print(f"{Color.GREEN}[Web] Re-check complete. Updating view.{Color.ENDC}")
@@ -671,7 +973,13 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                         statusEl.style.display = "inline";
                         statusEl.innerText = "Scanning...";
                     }}
-                    fetch(url, {{method:'POST'}}).then(() => {{
+                    var opts = {{method:'POST'}};
+                    if (url === '/apply') {{
+                        var resizeCovers = document.getElementById('resize-covers').checked;
+                        opts.headers = {{'Content-Type': 'application/json'}};
+                        opts.body    = JSON.stringify({{resize_covers: resizeCovers}});
+                    }}
+                    fetch(url, opts).then(() => {{
                         if (url === '/recheck') location.reload();
                         else if (url === '/apply') {{
                             document.body.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;color:#4caf50'><h1>All Done!</h1><p style='color:#aaa'>You can close this tab now.</p></div>";
@@ -697,6 +1005,7 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                 <div class="controls">
                     <span id="status"></span>
                     <label class="switch-label"><input type="checkbox" id="chk" onclick="filter()"> Changes Only</label>
+                    <label class="switch-label"><input type="checkbox" id="resize-covers" {'checked' if d['options'].get('cover_size') else ''}> Resize Covers (&gt;{COVER_MAX_SIZE}px)</label>
                     <button class="btn-re" onclick="post('/recheck')">↻ Re-check</button>
                     <button class="btn-no" onclick="post('/shutdown')">Cancel</button>
                     <button class="btn-go" onclick="post('/apply')">PROCEED →</button>
@@ -713,17 +1022,19 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
         return
 
 
-def organize_music_folders(root: str, **kwargs):
-    if not os.path.exists(root):
-        return print("Folder not found.")
+def organize_music_folders(roots: List[str], **kwargs):
+    for root in roots:
+        if not os.path.exists(root):
+            return print(f"Folder not found: {root}")
 
-    p_data, f_plan, d_plan, t_plan, stats, warns, alb_warns = run_scan_and_plan(root, kwargs)
+    p_data, f_plan, d_plan, t_plan, cov_plan, stats, warns, alb_warns = run_scan_and_plan(roots, kwargs)
 
     if kwargs.get('preview_mode'):
         print(f"\n{Color.CYAN}Starting Web Preview...{Color.ENDC}")
         AudioPreviewServer.data = {
             'preview': p_data, 'file_plan': f_plan, 'folder_plan': d_plan,
-            'tag_plan': t_plan, 'stats': stats, 'root': root, 'options': kwargs,
+            'tag_plan': t_plan, 'cover_resize_plan': cov_plan,
+            'stats': stats, 'roots': roots, 'options': kwargs,
         }
         try:
             server = HTTPServer(('localhost', 8000), AudioPreviewServer)
@@ -741,7 +1052,9 @@ def organize_music_folders(root: str, **kwargs):
     elif kwargs.get('check_only'):
         print(f"\n{Color.YELLOW}Check-only mode.{Color.ENDC}")
     else:
-        execute_changes(f_plan, d_plan, t_plan)
+        execute_changes(f_plan, d_plan, t_plan,
+                        cover_resize_plan=cov_plan,
+                        resize_covers=kwargs.get('cover_size', False))
 
     if warns or alb_warns:
         print(f"\n{Color.HEADER}--- Warnings ---{Color.ENDC}")
@@ -760,27 +1073,45 @@ def main():
 examples:
   aud-organize-library                          # current directory
   aud-organize-library ~/Music/
+  aud-organize-library --list                   # pick subdirs interactively
+  aud-organize-library --list ~/Music/          # pick from ~/Music subdirs
   aud-organize-library -p ~/Music/              # interactive web preview
-  aud-organize-library -c ~/Music/             # check only, no changes
+  aud-organize-library -c ~/Music/              # check only, no changes
   aud-organize-library -y ~/Music/              # auto-confirm everything
   aud-organize-library --folder-only ~/Music/   # skip file renaming
+  aud-organize-library --cover-size ~/Music/    # resize embedded covers > 700px
         """,
     )
-    parser.add_argument("folder",        nargs="?", default=os.getcwd(), help="Folder to scan (default: current directory)")
+    parser.add_argument("folder",        nargs="?", default=None,        help="Folder to scan (or base for --list; default: current directory)")
+    parser.add_argument("--list",             action="store_true", help="List subdirectories and interactively select which to process")
     parser.add_argument("-p", "--preview",     action="store_true", help="Open interactive web preview")
     parser.add_argument("-c", "--check",       action="store_true", help="Check only, make no changes")
     parser.add_argument("-y", "--force-yes",   action="store_true", help="Auto-confirm all prompts")
     parser.add_argument("-n", "--force-no",    action="store_true", help="Auto-decline all prompts")
     parser.add_argument("--folder-only",       action="store_true", help="Rename folders only, skip file renaming")
+    parser.add_argument("--cover-size",        action="store_true", help=f"Resize embedded covers larger than {COVER_MAX_SIZE}px on longest side")
     args = parser.parse_args()
 
+    if args.list:
+        base = args.folder if args.folder else os.getcwd()
+        if not os.path.isdir(base):
+            print(f"{Color.RED}Error: '{base}' is not a directory.{Color.ENDC}")
+            sys.exit(1)
+        chosen = list_and_select(base)
+        if not chosen:
+            sys.exit(0)
+        roots = chosen
+    else:
+        roots = [args.folder if args.folder else os.getcwd()]
+
     organize_music_folders(
-        args.folder,
+        roots,
         check_only    = args.check,
         force_yes     = args.force_yes,
         force_no      = args.force_no,
         preview_mode  = args.preview,
         folder_only   = args.folder_only,
+        cover_size    = args.cover_size,
         interactive   = True,
     )
 

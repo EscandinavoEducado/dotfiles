@@ -13,6 +13,8 @@ aud-fix-metadata — Batch capitalize and trim audio file metadata.
 Usage:
     aud-fix-metadata                        # scan current directory
     aud-fix-metadata ~/Music/Artist
+    aud-fix-metadata --list                 # pick subdirs interactively, then fix
+    aud-fix-metadata --list ~/Music/        # pick from ~/Music subdirs
     aud-fix-metadata -p ~/Music/            # interactive web preview
     aud-fix-metadata -a -at ~/Music/        # also check albums and artists
     aud-fix-metadata -il ~/Music/           # process non-English tags too
@@ -23,6 +25,7 @@ import sys
 import json
 import re
 import html
+import shutil
 import threading
 import webbrowser
 import argparse
@@ -53,6 +56,120 @@ class Color:
     RED    = '\033[91m'
     ENDC   = '\033[0m'
     BOLD   = '\033[1m'
+
+
+def get_subdirs(base):
+    """Return sorted list of immediate (non-hidden) subdirectories of *base*."""
+    try:
+        return sorted(
+            (p for p in os.scandir(base)
+             if p.is_dir() and not p.name.startswith(".")),
+            key=lambda e: e.name.lower(),
+        )
+    except PermissionError:
+        print(f"{Color.RED}✗ Permission denied: {base}{Color.ENDC}")
+        return []
+
+
+def parse_selection(raw, max_idx):
+    """
+    Parse a selection string like "1 3 5-8 10" into a sorted list of
+    0-based indices.  Returns an empty list if any token is invalid.
+    """
+    indices = set()
+    for token in raw.replace(",", " ").split():
+        if "-" in token:
+            parts = token.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except ValueError:
+                print(f"{Color.RED}  ✗ Invalid range: {token}{Color.ENDC}")
+                return []
+            if lo < 1 or hi > max_idx or lo > hi:
+                print(f"{Color.RED}  ✗ Range {token} out of bounds (1–{max_idx}){Color.ENDC}")
+                return []
+            indices.update(range(lo - 1, hi))
+        else:
+            try:
+                n = int(token)
+            except ValueError:
+                print(f"{Color.RED}  ✗ Not a number: {token}{Color.ENDC}")
+                return []
+            if n < 1 or n > max_idx:
+                print(f"{Color.RED}  ✗ Number {n} out of bounds (1–{max_idx}){Color.ENDC}")
+                return []
+            indices.add(n - 1)
+    return sorted(indices)
+
+
+def print_dir_grid(entries):
+    """Print numbered subdirectories in a compact two-column grid."""
+    if not entries:
+        print(f"  {Color.YELLOW}No subdirectories found.{Color.ENDC}")
+        return
+
+    num_w    = len(str(len(entries)))
+    col_w    = max(len(e.name) for e in entries) + num_w + 4
+    n_cols   = max(1, min(2, shutil.get_terminal_size(fallback=(80, 24)).columns // col_w))
+    n_rows   = -(-len(entries) // n_cols)   # ceiling division
+
+    for row in range(n_rows):
+        line = ""
+        for col in range(n_cols):
+            idx = row + col * n_rows
+            if idx >= len(entries):
+                break
+            label = f"{Color.CYAN}{idx + 1:>{num_w}}{Color.ENDC}  {Color.BOLD}{entries[idx].name}{Color.ENDC}"
+            # Pad with raw (non-ANSI) width so columns stay aligned
+            pad = col_w - (num_w + 2 + len(entries[idx].name))
+            line += label + " " * pad
+        print("  " + line)
+
+
+def list_and_select(base):
+    """
+    Show a numbered grid of subdirectories under *base*, prompt for
+    selection, and return the chosen directory paths as strings.
+    """
+    entries = get_subdirs(base)
+
+    print()
+    print(f"{Color.CYAN}{Color.BOLD}Select directories{Color.ENDC}  {Color.CYAN}{base}{Color.ENDC}")
+    print()
+
+    if not entries:
+        print(f"  {Color.YELLOW}No subdirectories found.{Color.ENDC}")
+        print()
+        return []
+
+    print_dir_grid(entries)
+    print()
+    print(f"  {Color.YELLOW}Enter numbers, ranges, or both — e.g. 1 3 5-8  (space or comma separated){Color.ENDC}")
+    print()
+
+    while True:
+        try:
+            raw = input("  Selection: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print(f"  {Color.YELLOW}Cancelled.{Color.ENDC}")
+            sys.exit(0)
+
+        if not raw:
+            print(f"  {Color.YELLOW}Nothing selected. Exiting.{Color.ENDC}")
+            sys.exit(0)
+
+        idxs = parse_selection(raw, len(entries))
+        if idxs:
+            chosen = [entries[i].path for i in idxs]
+            print()
+            label = "directory" if len(chosen) == 1 else "directories"
+            print(f"  {Color.GREEN}●{Color.ENDC} Selected {Color.BOLD}{len(chosen)}{Color.ENDC} {label}:")
+            for d in chosen:
+                print(f"    {Color.CYAN}•{Color.ENDC} {d}")
+            print()
+            return chosen
+        # parse_selection already printed the error; loop to re-prompt
 
 
 def capitalize_roman_numerals(text):
@@ -126,8 +243,11 @@ def smart_format_text(text, ignore_language_filter=False):
 
 
 class TitleProcessor:
-    def __init__(self, root_folder, check_title=True, check_album=False, check_artist=False, ignore_lang=False):
-        self.root_folder  = root_folder
+    def __init__(self, root_folders, check_title=True, check_album=False, check_artist=False, ignore_lang=False):
+        # Accept either a single path string or a list of paths
+        if isinstance(root_folders, (str, bytes)):
+            root_folders = [root_folders]
+        self.root_folders = list(root_folders)
         self.check_title  = check_title
         self.check_album  = check_album
         self.check_artist = check_artist
@@ -141,33 +261,34 @@ class TitleProcessor:
         self.proposals = []
 
     def scan(self):
-        print(f"{Color.BLUE}Scanning '{self.root_folder}'...{Color.ENDC}")
-        for dirpath, _, filenames in os.walk(self.root_folder):
-            for f in filenames:
-                if f.lower().endswith(SUPPORTED_EXTENSIONS):
-                    path = os.path.join(dirpath, f)
-                    try:
-                        audio = MutagenFile(path, easy=True)
-                        if not audio:
-                            continue
+        for folder in self.root_folders:
+            print(f"{Color.BLUE}Scanning '{folder}'...{Color.ENDC}")
+            for dirpath, _, filenames in os.walk(folder):
+                for f in filenames:
+                    if f.lower().endswith(SUPPORTED_EXTENSIONS):
+                        path = os.path.join(dirpath, f)
+                        try:
+                            audio = MutagenFile(path, easy=True)
+                            if not audio:
+                                continue
 
-                        def get_tag(tag_name):
-                            return audio.get(tag_name, [None])[0]
+                            def get_tag(tag_name):
+                                return audio.get(tag_name, [None])[0]
 
-                        if self.check_title:
-                            val = get_tag('title')
-                            if val: self.groups['Title'][val].append(path)
+                            if self.check_title:
+                                val = get_tag('title')
+                                if val: self.groups['Title'][val].append(path)
 
-                        if self.check_album:
-                            val = get_tag('album')
-                            if val: self.groups['Album'][val].append(path)
+                            if self.check_album:
+                                val = get_tag('album')
+                                if val: self.groups['Album'][val].append(path)
 
-                        if self.check_artist:
-                            val = get_tag('artist')
-                            if val: self.groups['Artist'][val].append(path)
+                            if self.check_artist:
+                                val = get_tag('artist')
+                                if val: self.groups['Artist'][val].append(path)
 
-                    except Exception as e:
-                        print(f"{Color.RED}Error reading {f}: {e}{Color.ENDC}")
+                        except Exception as e:
+                            print(f"{Color.RED}Error reading {f}: {e}{Color.ENDC}")
 
     def generate_proposals(self):
         print(f"{Color.CYAN}Analyzing metadata and checking for whitespace...{Color.ENDC}")
@@ -413,12 +534,15 @@ def main():
 examples:
   aud-fix-metadata                          # current directory
   aud-fix-metadata ~/Music/Artist
+  aud-fix-metadata --list                   # pick subdirs interactively
+  aud-fix-metadata --list ~/Music/          # pick from ~/Music subdirs
   aud-fix-metadata -p ~/Music/              # interactive web preview
   aud-fix-metadata -a -at ~/Music/          # also check albums and artists
   aud-fix-metadata -il ~/Music/             # process non-English tags too
         """,
     )
-    parser.add_argument("folder", nargs="?", default=os.getcwd(), help="Folder to scan")
+    parser.add_argument("folder", nargs="?", default=None, help="Folder to scan (or base for --list)")
+    parser.add_argument("--list", action="store_true", help="List subdirectories and interactively select which to process")
     parser.add_argument("-p",  "--preview",     action="store_true", help="Open interactive web preview")
     parser.add_argument("-nt", "--no-title",    action="store_true", help="Skip checking Titles")
     parser.add_argument("-a",  "--album",       action="store_true", help="Check Albums")
@@ -426,9 +550,26 @@ examples:
     parser.add_argument("-il", "--ignore-lang", action="store_true", help="Show all files and process non-English tags")
     args = parser.parse_args()
 
-    if not os.path.exists(args.folder):
-        print(f"{Color.RED}Error: Folder '{args.folder}' not found.{Color.ENDC}")
-        sys.exit(1)
+    if args.list:
+        base = args.folder if args.folder else os.getcwd()
+        if not os.path.isdir(base):
+            print(f"{Color.RED}Error: '{base}' is not a directory.{Color.ENDC}")
+            sys.exit(1)
+        chosen = list_and_select(base)
+        if not chosen:
+            sys.exit(0)
+        _run(chosen, args)
+        return
+
+    folder = args.folder if args.folder else os.getcwd()
+    _run([folder], args)
+
+
+def _run(folders, args):
+    for folder in folders:
+        if not os.path.exists(folder):
+            print(f"{Color.RED}Error: Folder '{folder}' not found.{Color.ENDC}")
+            sys.exit(1)
 
     check_title = not args.no_title
 
@@ -437,7 +578,7 @@ examples:
         sys.exit(0)
 
     processor = TitleProcessor(
-        args.folder,
+        folders,
         check_title=check_title,
         check_album=args.album,
         check_artist=args.artist,

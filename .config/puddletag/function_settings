@@ -45,5 +45,11 @@
     "fields": [
       "artist"
     ]
+  },
+  "puddlestuff.functions_remove_fields": {
+    "arguments": [],
+    "fields": [
+      "__image"
+    ]
   }
 }

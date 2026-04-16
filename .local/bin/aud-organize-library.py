@@ -343,6 +343,23 @@ def _write_cover_to_file(file_path: str, pic_data: bytes, mime: str, width: int,
             audio.save()
             return True
 
+        # ID3 (MP3)
+        apic_keys = [k for k in tags.keys() if k.startswith('APIC:')]
+        if apic_keys:
+            for key in apic_keys:
+                audio.tags[key].data = pic_data
+                audio.tags[key].mime = mime
+            audio.save()
+            return True
+
+        # MP4/M4A
+        if 'covr' in tags:
+            from mutagen.mp4 import MP4Cover
+            fmt = MP4Cover.FORMAT_JPEG if mime in ('image/jpeg', 'image/jpg') else MP4Cover.FORMAT_PNG
+            audio.tags['covr'] = [MP4Cover(pic_data, imageformat=fmt)]
+            audio.save()
+            return True
+
         return False
 
     except Exception as e:
@@ -361,13 +378,29 @@ def _read_raw_cover(file_path: str):
         if not audio:
             return None, None
         tags = audio.tags or {}
+
+        # OggOpus / Vorbis
         for key in ('metadata_block_picture', 'METADATA_BLOCK_PICTURE'):
             if key in tags:
                 pic = Picture(base64.b64decode(tags[key][0]))
                 return pic.data, pic.mime
+
+        # FLAC native
         if hasattr(audio, 'pictures') and audio.pictures:
             pic = audio.pictures[0]
             return pic.data, pic.mime
+
+        # ID3 (MP3)
+        for key in tags.keys():
+            if key.startswith('APIC:'):
+                return tags[key].data, tags[key].mime
+
+        # MP4/M4A
+        if 'covr' in tags:
+            pic = tags['covr'][0]
+            mime = 'image/jpeg' if bytes(pic).startswith(b'\xff\xd8') else 'image/png'
+            return bytes(pic), mime
+
     except Exception:
         pass
     return None, None

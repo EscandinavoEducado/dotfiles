@@ -739,7 +739,8 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
         # can group by hash and resize each unique image only once.
         for m in info['files_metadata']:
             if max(m.get('cover_art_w', 0), m.get('cover_art_h', 0)) > COVER_MAX_SIZE:
-                fpath = os.path.join(info['path'], m['filename'])
+                final_filename = file_map.get(m['filename'], m['filename'])
+                fpath = os.path.join(final_path, final_filename)
                 cover_resize_plan.append((fpath, m.get('cover_art_hash', '')))
 
         p_files_list = []

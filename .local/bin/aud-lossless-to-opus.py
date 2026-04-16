@@ -24,38 +24,30 @@ Usage:
 
 import sys
 import os
-import subprocess
 import argparse
-import signal
-import base64
-import shutil
-import math
 import threading
 import concurrent.futures
 from pathlib import Path
 from typing import Optional, List, Tuple
 
+# ── shared library ────────────────────────────────────────────────────────────
+sys.path.insert(0, str(Path.home() / ".local" / "lib"))
+import aud_opus_lib as lib
+console = lib.console
+
+# ── mutagen (format-specific pieces not in the lib) ───────────────────────────
 _missing = []
 try:
     from mutagen.oggopus import OggOpus
     from mutagen.flac import Picture, FLAC
     from mutagen.mp4 import MP4
-    from mutagen.id3 import ID3NoHeaderError
     from mutagen import File as MutagenFile
 except ImportError:
     _missing.append("mutagen  →  pip install mutagen")
 
 try:
-    from rich.console import Console
-    from rich.progress import (
-        Progress, SpinnerColumn, TextColumn,
-        BarColumn, MofNCompleteColumn, TimeRemainingColumn,
-    )
-    from rich.table import Table
-    from rich.panel import Panel
     from rich.rule import Rule
-    from rich.columns import Columns
-    from rich.text import Text
+    from rich.panel import Panel
     from rich.markup import escape
 except ImportError:
     _missing.append("rich     →  pip install rich")
@@ -70,24 +62,6 @@ DURATION_TOLS       = 1.0
 
 LOSSLESS_SUFFIXES = {".flac", ".wav", ".aiff", ".aif", ".m4a", ".wv", ".ape"}
 
-console = Console(highlight=False)
-
-
-def fmt_size(n: int) -> str:
-    if n < 0:
-        return f"-{fmt_size(-n)}"
-    if n < 1024:
-        return f"{n} B"
-    if n < 1024 ** 2:
-        return f"{n/1024:.1f} KB"
-    return f"{n/1024**2:.1f} MB"
-
-def check_ffmpeg() -> bool:
-    try:
-        r = subprocess.run(["ffmpeg", "-version"], capture_output=True)
-        return r.returncode == 0
-    except FileNotFoundError:
-        return False
 
 def find_lossless_files(folders: List[Path]) -> List[Path]:
     found: List[Path] = []
@@ -152,36 +126,7 @@ def get_source_info(path: Path) -> dict:
     return info
 
 
-def convert(src: Path, opus: Path, kbps: int) -> Tuple[bool, str]:
-    """
-    Run ffmpeg — audio only (-vn). Cover art is handled separately via mutagen
-    so we avoid ffmpeg's unreliable OGG video-stream embedding.
-    All Vorbis tags copied via -map_metadata 0.
-    """
-    cmd = [
-        "ffmpeg",
-        "-v", "error",
-        "-i", str(src),
-        "-vn",
-        "-map_metadata", "0",
-        "-c:a", "libopus",
-        "-b:a", f"{kbps}k",
-        "-vbr", "on",
-        "-compression_level", "10",
-        "-y",
-        str(opus),
-    ]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            if opus.exists() and opus.stat().st_size > 0:
-                return True, ""
-            err = (r.stderr or "unknown error").strip().splitlines()
-            short = next((l for l in reversed(err) if l.strip()), err[-1] if err else "unknown")
-            return False, short
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+convert = lib.convert  # ffmpeg invocation is identical for all source formats
 
 
 def _picture_from_id3_apic(tags) -> Optional[Picture]:
@@ -201,8 +146,7 @@ def _picture_from_id3_apic(tags) -> Optional[Picture]:
 
 def embed_cover_art(src: Path, opus: Path) -> bool:
     """
-    Extract cover art from the source file and embed it into the Opus file as a
-    base64-encoded METADATA_BLOCK_PICTURE Vorbis comment.
+    Extract cover art from *src* and embed it into *opus*.
 
     Supports:
       - FLAC  → native Picture list
@@ -223,7 +167,6 @@ def embed_cover_art(src: Path, opus: Path) -> bool:
             mp4 = MP4(src)
             covr = (mp4.tags or {}).get("covr")
             if covr:
-                raw = bytes(covr[0])
                 from mutagen.mp4 import MP4Cover
                 mime = (
                     "image/png"
@@ -231,10 +174,10 @@ def embed_cover_art(src: Path, opus: Path) -> bool:
                     else "image/jpeg"
                 )
                 pic = Picture()
-                pic.data   = raw
-                pic.type   = 3        # front cover
-                pic.mime   = mime
-                pic.desc   = ""
+                pic.data  = bytes(covr[0])
+                pic.type  = 3
+                pic.mime  = mime
+                pic.desc  = ""
                 pic.width = pic.height = pic.depth = pic.colors = 0
 
         elif suffix in {".wav", ".aiff", ".aif"}:
@@ -251,20 +194,16 @@ def embed_cover_art(src: Path, opus: Path) -> bool:
                 img_data = raw[null_pos + 1:] if null_pos != -1 else raw
                 mime = "image/jpeg" if img_data[:2] == b"\xff\xd8" else "image/png"
                 pic = Picture()
-                pic.data   = img_data
-                pic.type   = 3
-                pic.mime   = mime
-                pic.desc   = ""
+                pic.data  = img_data
+                pic.type  = 3
+                pic.mime  = mime
+                pic.desc  = ""
                 pic.width = pic.height = pic.depth = pic.colors = 0
 
         if pic is None:
             return False
 
-        encoded = base64.b64encode(pic.write()).decode("ascii")
-        opus_audio = OggOpus(opus)
-        opus_audio["metadata_block_picture"] = [encoded]
-        opus_audio.save()
-        return True
+        return lib.embed_picture_in_opus(pic, opus)
 
     except Exception:
         return False
@@ -275,182 +214,36 @@ def verify(src: Path, opus: Path, src_info: dict) -> Tuple[bool, List[str]]:
     Sanity-check the converted Opus file. Returns (ok, list_of_issues).
     Checks: file exists & non-empty, duration, cover art, key tags.
     """
-    issues: List[str] = []
+    ok, issues, af = lib.verify_opus_basics(opus, src_info, DURATION_TOLS)
+    if af is None:
+        return ok, issues
 
-    if not opus.exists():
-        return False, ["Output file does not exist"]
-    if opus.stat().st_size == 0:
-        return False, ["Output file is empty (0 bytes)"]
+    # Lossless sources carry native Vorbis keys already, so compare directly.
+    tags = af.tags or {}
+    vorbis_keys = ["title", "artist", "album", "tracknumber", "date"]
+    snap = src_info["tag_snapshot"]
+    snap_lower = {k.lower(): v for k, v in snap.items()}
 
-    try:
-        af = MutagenFile(opus)
-        if af is None:
-            return False, ["mutagen cannot open output file"]
-
-        dur_diff = abs(af.info.length - src_info["duration"])
-        allowed_diff = max(DURATION_TOLS, src_info["duration"] * 0.10)
-        if dur_diff > allowed_diff:
+    for vk in vorbis_keys:
+        src_val = snap_lower.get(vk, "").strip()
+        if not src_val:
+            continue
+        dst_val = ""
+        if vk in tags:
+            v = tags[vk]
+            dst_val = (str(v[0]) if isinstance(v, list) else str(v)).strip()
+        if src_val.lower() != dst_val.lower():
             issues.append(
-                f"Duration mismatch: source={src_info['duration']:.1f}s "
-                f"opus={af.info.length:.1f}s  Δ={dur_diff:.1f}s"
+                f"Tag mismatch [{vk}]: source={src_val!r} → opus={dst_val!r}"
             )
-
-        tags = af.tags or {}
-
-        if src_info["has_cover"]:
-            has = (
-                "metadata_block_picture" in tags
-                or "METADATA_BLOCK_PICTURE" in tags
-            )
-            if not has:
-                issues.append("Cover art missing in output")
-
-        vorbis_keys = ["title", "artist", "album", "tracknumber", "date"]
-        snap = src_info["tag_snapshot"]
-        snap_lower = {k.lower(): v for k, v in snap.items()}
-
-        for vk in vorbis_keys:
-            src_val = snap_lower.get(vk, "").strip()
-            if not src_val:
-                continue
-            dst_val = ""
-            if vk in tags:
-                v = tags[vk]
-                dst_val = (str(v[0]) if isinstance(v, list) else str(v)).strip()
-            if src_val.lower() != dst_val.lower():
-                issues.append(
-                    f"Tag mismatch [{vk}]: source={src_val!r} → opus={dst_val!r}"
-                )
-
-    except Exception as e:
-        issues.append(f"Verification error: {e}")
 
     return len(issues) == 0, issues
 
 
-def get_subdirs(base: Path) -> List[Path]:
-    """Return sorted list of immediate subdirectories of *base*."""
-    try:
-        return sorted(
-            (p for p in base.iterdir()
-             if p.is_dir() and not p.name.startswith(".")),
-            key=lambda p: p.name.lower(),
-        )
-    except PermissionError:
-        console.print(f"[red]✗[/red] Permission denied: [bold]{base}[/bold]")
-        return []
-
-
-def parse_selection(raw: str, max_idx: int) -> List[int]:
-    """
-    Parse a selection string like "1 3 5-8 10" into a sorted list of
-    0-based indices.  Returns an empty list if any token is invalid.
-    """
-    indices: set[int] = set()
-    for token in raw.replace(",", " ").split():
-        if "-" in token:
-            parts = token.split("-", 1)
-            try:
-                lo, hi = int(parts[0]), int(parts[1])
-            except ValueError:
-                console.print(f"  [red]✗[/red] Invalid range: [bold]{token}[/bold]")
-                return []
-            if lo < 1 or hi > max_idx or lo > hi:
-                console.print(
-                    f"  [red]✗[/red] Range [bold]{token}[/bold] out of bounds "
-                    f"(1–{max_idx})"
-                )
-                return []
-            indices.update(range(lo - 1, hi))
-        else:
-            try:
-                n = int(token)
-            except ValueError:
-                console.print(f"  [red]✗[/red] Not a number: [bold]{token}[/bold]")
-                return []
-            if n < 1 or n > max_idx:
-                console.print(
-                    f"  [red]✗[/red] Number [bold]{n}[/bold] out of bounds "
-                    f"(1–{max_idx})"
-                )
-                return []
-            indices.add(n - 1)
-    return sorted(indices)
-
-
-def print_dir_grid(subdirs: List[Path]) -> None:
-    """Print numbered subdirectories in a compact multi-column grid."""
-    if not subdirs:
-        console.print("  [yellow]No subdirectories found.[/yellow]")
-        return
-
-    # Build labelled items: "  1  dirname"
-    num_w   = len(str(len(subdirs)))          # width of the widest index
-    items   = []
-    for i, d in enumerate(subdirs, 1):
-        label = Text()
-        label.append(f"{i:>{num_w}}", style="dim cyan")
-        label.append("  ")
-        label.append(d.name, style="bold")
-        items.append(label)
-
-    console.print(Columns(items, padding=(0, 2), equal=True))
-
-
-def list_and_select(base: Path) -> List[Path]:
-    """
-    Show a grid of subdirectories under *base*, prompt for selection,
-    and return the chosen Path objects.
-    """
-    subdirs = get_subdirs(base)
-
-    console.print()
-    console.print(Panel.fit(
-        f"[bold cyan]Select directories[/bold cyan]   "
-        f"[dim]{base}[/dim]",
-        border_style="cyan",
-        padding=(0, 2),
-    ))
-    console.print()
-
-    if not subdirs:
-        console.print("  [yellow]No subdirectories found.[/yellow]")
-        console.print()
-        return []
-
-    print_dir_grid(subdirs)
-    console.print()
-    console.print(
-        "  [dim]Enter numbers, ranges, or both — e.g. [bold]1 3 5-8[/bold]  "
-        "(space or comma separated)[/dim]"
-    )
-    console.print()
-
-    while True:
-        try:
-            raw = input("  Selection: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print()
-            console.print("  [yellow]Cancelled.[/yellow]")
-            sys.exit(0)
-
-        if not raw:
-            console.print("  [yellow]Nothing selected. Exiting.[/yellow]")
-            sys.exit(0)
-
-        idxs = parse_selection(raw, len(subdirs))
-        if idxs:
-            chosen = [subdirs[i] for i in idxs]
-            console.print()
-            console.print(
-                f"  [green]●[/green] Selected [bold]{len(chosen)}[/bold] "
-                f"director{'y' if len(chosen) == 1 else 'ies'}:"
-            )
-            for d in chosen:
-                console.print(f"    [cyan]•[/cyan] {d}")
-            console.print()
-            return chosen
-        # parse_selection already printed the error; loop to re-prompt
+get_subdirs      = lib.get_subdirs
+parse_selection  = lib.parse_selection
+print_dir_grid   = lib.print_dir_grid
+list_and_select  = lib.list_and_select
 
 
 def main() -> None:
@@ -507,23 +300,14 @@ examples:
     elif not args.folders:
         args.folders = [Path.cwd()]
 
-    interrupted = False
+    interrupted_event = threading.Event()
     lock = threading.Lock()
     _active_opus: set[Path] = set()
 
-    def _sigint(sig, frame):
-        nonlocal interrupted
-        interrupted = True
-        with lock:
-            to_clean = set(_active_opus)
-        for p in to_clean:
-            if p.exists():
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+    interrupted_event, _ = lib.make_interrupt_handler(_active_opus, lock)
 
-    signal.signal(signal.SIGINT, _sigint)
+    def interrupted() -> bool:
+        return interrupted_event.is_set()
 
     console.print()
     flags = []
@@ -539,7 +323,7 @@ examples:
     ))
     console.print()
 
-    if not check_ffmpeg():
+    if not lib.check_ffmpeg():
         console.print("[bold red]✗ ffmpeg not found.[/bold red] "
                       "Install it and make sure it is on your PATH.")
         sys.exit(1)
@@ -554,7 +338,7 @@ examples:
     total_bytes = sum(f.stat().st_size for f in src_files)
     console.print(
         f"[green]●[/green] Found [bold]{len(src_files)}[/bold] lossless file(s)  "
-        f"[dim]({fmt_size(total_bytes)} total)[/dim]"
+        f"[dim]({lib.fmt_size(total_bytes)} total)[/dim]"
     )
     console.print()
 
@@ -580,22 +364,14 @@ examples:
         console.print(f"  [dim]Running {args.workers} workers in parallel[/dim]")
     console.print()
 
-    with Progress(
-        SpinnerColumn(style="cyan"),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=28, style="cyan", complete_style="green"),
-        MofNCompleteColumn(),
-        TimeRemainingColumn(compact=True),
-        console=console,
-        transient=False,
-    ) as prog:
+    with lib.make_progress() as prog:
         task = prog.add_task(
             "[bold cyan]Overall[/bold cyan]",
             total=len(src_files),
         )
 
         def process_one(src: Path) -> None:
-            if interrupted:
+            if interrupted():
                 prog.advance(task)
                 return
 
@@ -632,7 +408,7 @@ examples:
             with lock:
                 _active_opus.discard(opus)
 
-            if interrupted and not ok:
+            if interrupted() and not ok:
                 prog.advance(task)
                 return
 
@@ -671,7 +447,7 @@ examples:
 
             cov_tag  = " [dim]🖼[/dim]" if src_info["has_cover"] else ""
             size_str = (
-                f"[dim]{fmt_size(src_size)} → {fmt_size(opus_size)} "
+                f"[dim]{lib.fmt_size(src_size)} → {lib.fmt_size(opus_size)} "
                 f"({ratio:.0f}%)[/dim]"
             )
 
@@ -693,7 +469,7 @@ examples:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             futs = {executor.submit(process_one, src): src for src in src_files}
             for fut in concurrent.futures.as_completed(futs):
-                if interrupted:
+                if interrupted():
                     for f in futs:
                         f.cancel()
                     prog.print("  [yellow]⚡ Interrupted by user.[/yellow]")
@@ -709,36 +485,7 @@ examples:
                     with lock:
                         stats["failed"] += 1
 
-    console.print()
-    console.print(Rule("[bold]Summary[/bold]"))
-    console.print()
-
-    t = Table(show_header=False, box=None, padding=(0, 2))
-    t.add_column("k", style="dim")
-    t.add_column("v", style="bold")
-
-    t.add_row("Converted",   f"[green]{stats['converted']}[/green]")
-    if stats["skipped"]:
-        t.add_row("Skipped", f"[yellow]{stats['skipped']}[/yellow]")
-    if stats["failed"]:
-        t.add_row("Failed",  f"[red]{stats['failed']}[/red]")
-    if not args.keep_originals and stats["deleted"]:
-        t.add_row("Originals deleted", f"[green]{stats['deleted']}[/green]")
-    if stats["saved"] > 0:
-        t.add_row("Space freed", f"[cyan]{fmt_size(stats['saved'])}[/cyan]")
-    elif stats["saved"] < 0:
-        t.add_row("Space added", f"[yellow]+{fmt_size(-stats['saved'])}[/yellow]")
-
-    console.print(t)
-
-    if failures:
-        console.print()
-        console.print("[bold red]Failed files:[/bold red]")
-        for path, reason in failures:
-            console.print(f"  [red]•[/red] {path}")
-            console.print(f"    [dim]{reason}[/dim]")
-
-    console.print()
+    lib.print_summary(stats, failures, args.keep_originals)
     if stats["failed"] > 0:
         sys.exit(1)
 

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+cue_file=$(ls *.cue 2>/dev/null | head -n 1)
+audio_file=$(ls *.flac 2>/dev/null | head -n 1)
+
+if [ -z "$cue_file" ] || [ -z "$audio_file" ]; then
+    echo "Error: CUE or audio file missing."
+    exit 1
+fi
+
+mv "$audio_file" "$audio_file.bak"
+
+shnsplit -f "$cue_file" -t "%n - %t" -o flac "$audio_file.bak"
+rm -f *pregap*.flac 2>/dev/null
+
+cuetag.sh "$cue_file" *.flac
+
+if [ "$1" = "rm" ]; then
+    rm "$audio_file.bak"
+    rm "$cue_file"
+    echo "Original file and CUE removed."
+else
+    mv "$audio_file.bak" "$audio_file"
+fi

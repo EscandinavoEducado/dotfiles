@@ -1,32 +1,58 @@
 {
-    "Name": "main.fyl",
+    "Name": "main",
     "Version": 1,
     "Widgets": [
         {
             "SplitterHorizontal": {
-                "State": "AAAA/wAAAAEAAAACAAABOAAABjsA/////wEAAAABAA==",
+                "State": "AAAA/wAAAAEAAAACAAAA5AAABIUA/////wEAAAABAA==",
                 "Widgets": [
                     {
                         "SplitterVertical": {
-                            "State": "AAAA/wAAAAEAAAACAAACmwAAATgA/////wEAAAACAA==",
+                            "State": "AAAA/wAAAAEAAAACAAABcAAAAOQA/////wEAAAACAA==",
                             "Widgets": [
                                 {
                                     "TabStack": {
                                         "Position": "North",
-                                        "State": "Playlist Organizer\u001fSelection Info",
+                                        "RememberLastTab": false,
+                                        "State": "Tab Stack\u001fDirectory Browser",
                                         "Widgets": [
                                             {
-                                                "PlaylistOrganiser": {
+                                                "TabStack": {
+                                                    "Position": "North",
+                                                    "RememberLastTab": false,
+                                                    "State": "Playlist Organizer\u001fSelection Info",
+                                                    "Widgets": [
+                                                        {
+                                                            "PlaylistOrganiser": {
+                                                            }
+                                                        },
+                                                        {
+                                                            "SelectionInfo": {
+                                                                "AlternatingRows": true,
+                                                                "Options": 87,
+                                                                "ShowHeader": true,
+                                                                "ShowHorizontalScrollbar": false,
+                                                                "ShowVerticalScrollbar": true,
+                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANEAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAbQAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+                                                            }
+                                                        }
+                                                    ]
                                                 }
                                             },
                                             {
-                                                "SelectionInfo": {
-                                                    "AlternatingRows": true,
-                                                    "Options": 23,
-                                                    "ShowHeader": true,
-                                                    "ShowHorizontalScrollbar": false,
-                                                    "ShowVerticalScrollbar": true,
-                                                    "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATIAAAACAAAAAQAAAAABAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAzgAAAAEAAAABAAAD6AAAAABkAAAAAAAAAAAAAAAAAAAAAQ=="
+                                                "DirectoryBrowser": {
+                                                    "DoubleClickAction": 5,
+                                                    "IndentList": true,
+                                                    "MiddleClickAction": 0,
+                                                    "Mode": 1,
+                                                    "RootPath": "/home/salty",
+                                                    "SendPlayback": true,
+                                                    "ShowControls": true,
+                                                    "ShowHidden": false,
+                                                    "ShowHorizontalScrollbar": true,
+                                                    "ShowIcons": true,
+                                                    "ShowLocation": true,
+                                                    "ShowSymLinks": false
                                                 }
                                             }
                                         ]
@@ -36,6 +62,8 @@
                                     "ArtworkPanel": {
                                         "CoverAlignment": 132,
                                         "CoverType": 0,
+                                        "FadeCoverChanges": false,
+                                        "FadeDurationMs": 1000,
                                         "KeepAspectRatio": true
                                     }
                                 }
@@ -44,11 +72,11 @@
                     },
                     {
                         "SplitterVertical": {
-                            "State": "AAAA/wAAAAEAAAACAAADLwAAAKQA/////wEAAAACAA==",
+                            "State": "AAAA/wAAAAEAAAACAAAB2gAAAHoA/////wEAAAACAA==",
                             "Widgets": [
                                 {
                                     "SplitterVertical": {
-                                        "State": "AAAA/wAAAAEAAAACAAAAIAAAAw4A/////wEAAAACAA==",
+                                        "State": "AAAA/wAAAAEAAAACAAAAIAAAAcIA/////wEAAAACAA==",
                                         "Widgets": [
                                             {
                                                 "SplitterHorizontal": {
@@ -80,17 +108,28 @@
                                                                                         "Widgets": [
                                                                                             {
                                                                                                 "PeakMeter": {
+                                                                                                    "BarSections": 1,
+                                                                                                    "BarSize": 0,
+                                                                                                    "BarSpacing": 1,
+                                                                                                    "ChannelSpacing": 1,
+                                                                                                    "FalloffTime": 13,
                                                                                                     "Orientation": 1,
+                                                                                                    "PeakHoldTime": 1.5,
+                                                                                                    "SectionSpacing": 1,
                                                                                                     "ShowLegend": false,
-                                                                                                    "ShowPeaks": false
+                                                                                                    "ShowPeaks": false,
+                                                                                                    "UpdateFps": 40,
+                                                                                                    "UseCustomColours": false
                                                                                                 }
                                                                                             },
                                                                                             {
                                                                                                 "SplitterHorizontal": {
-                                                                                                    "State": "AAAA/wAAAAEAAAACAAADUgAAASUA/////wEAAAABAA==",
+                                                                                                    "State": "AAAA/wAAAAEAAAACAAADagAAAQ0A/////wEAAAABAA==",
                                                                                                     "Widgets": [
                                                                                                         {
-                                                                                                            "StatusBar": {
+                                                                                                            "SeekBar": {
+                                                                                                                "ElapsedTotal": false,
+                                                                                                                "ShowLabels": true
                                                                                                             }
                                                                                                         },
                                                                                                         {
@@ -124,7 +163,7 @@
                                                         {
                                                             "Playlist": {
                                                                 "Columns": "8:132|0:2|1|7:2|2|5|9|22",
-                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYBABYgMGBiYZIO3FwMDIDsTPgOxAIA5igKgBAUYgZgFiJiBmBWJmIGYDYnaQGvuO14pVMTv22s+78FPS6CGb/dVV71W3H7OwX/4guFbt8kf7o9LyH6Y3F9tf7mr28n/Har+KIUjX6e1L+1UpTOon3+8AGc7w/////wBugiY5",
+                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYBABYlUGBsYdQNodiDuB7B4g7QLEoQwQNSDACMQsQMwExKxAzAzEbEDMDlJj3/FasSpmx177eRd+Sho9ZLO/1pz7ffqEGvu11l2mexqv2O+RXDX9pEK7/RUnExafVhf71R+TrJ4q7rffmL7l1N70OJDhDP////8PALJPJqA=",
                                                                 "ID": "ad10902099de4eb6aae58ab74e9e37af",
                                                                 "Preset": 0,
                                                                 "SingleMode": false
@@ -137,9 +176,31 @@
                                     }
                                 },
                                 {
-                                    "WaveBar": {
-                                        "ElapsedTotal": false,
-                                        "ShowLabels": false
+                                    "SplitterVertical": {
+                                        "State": "AAAA/wAAAAEAAAACAAAAbgAAABYA/////wEAAAACAA==",
+                                        "Widgets": [
+                                            {
+                                                "WaveBar": {
+                                                    "BarGap": 0,
+                                                    "BarWidth": 1,
+                                                    "CentreGap": 0,
+                                                    "ChannelScale": 0.9,
+                                                    "CursorWidth": 3,
+                                                    "Downmix": 0,
+                                                    "ElapsedTotal": false,
+                                                    "MaxScale": 1,
+                                                    "Mode": 7,
+                                                    "ShowCursor": true,
+                                                    "ShowLabels": false,
+                                                    "SupersampleFactor": 1,
+                                                    "UseCustomColours": false
+                                                }
+                                            },
+                                            {
+                                                "StatusBar": {
+                                                }
+                                            }
+                                        ]
                                     }
                                 }
                             ]

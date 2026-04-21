@@ -1,0 +1,17 @@
+{
+  "info": {
+    "name": "Sanitize year"
+  },
+  "Func0": {
+    "fields": [
+      "year"
+    ],
+    "func_name": "replaceWithReg",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      ".*?(19\\d{2}|20\\d{2}).*",
+      "$1",
+      false
+    ]
+  }
+}

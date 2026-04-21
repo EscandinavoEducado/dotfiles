@@ -1,0 +1,25 @@
+{
+  "info": {
+    "name": "Sanitize track and discnum"
+  },
+  "Func0": {
+    "fields": [
+      "track"
+    ],
+    "func_name": "formatValue",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "$num(%track%,1)"
+    ]
+  },
+  "Func1": {
+    "fields": [
+      "discnumber"
+    ],
+    "func_name": "formatValue",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "$num(%discnumber%,1)"
+    ]
+  }
+}

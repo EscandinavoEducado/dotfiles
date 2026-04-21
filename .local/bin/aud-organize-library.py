@@ -27,6 +27,7 @@ import io
 import base64
 import hashlib
 import shutil
+import tempfile
 import webbrowser
 import html
 import threading
@@ -56,6 +57,7 @@ STANDARD_AUDIO_FORMATS     = ('.opus', '.flac')
 COVER_MAX_SIZE             = 700
 PATH_LENGTH_LIMIT_BYTES    = 230
 FILE_NAME_RESERVE_BYTES    = 20
+ARTWORK_DIRNAME            = 'artwork'
 
 if os.name == 'nt':
     os.system('')
@@ -305,58 +307,61 @@ def _resize_image_bytes(data: bytes, mime: str, max_size: int) -> Tuple[bytes, s
 
 
 def _write_cover_to_file(file_path: str, pic_data: bytes, mime: str, width: int, height: int) -> bool:
-    """Write pre-resized cover bytes into the audio file's embedded tag."""
+    """Write cover bytes into the audio file's embedded tag, creating the tag if absent."""
     try:
-        from mutagen.flac import Picture
+        from mutagen.flac   import FLAC, Picture
+        from mutagen.mp3    import MP3
+        from mutagen.id3    import APIC, ID3
+        from mutagen.mp4    import MP4, MP4Cover
+        from mutagen.oggopus   import OggOpus
+        from mutagen.oggvorbis import OggVorbis
+
         audio = MutagenFile(file_path)
-        if not audio:
+        if audio is None:
             return False
 
-        tags = audio.tags or {}
+        def _make_picture() -> Picture:
+            pic        = Picture()
+            pic.type   = 3          # Front Cover
+            pic.mime   = mime
+            pic.width  = width
+            pic.height = height
+            pic.depth  = 24
+            pic.data   = pic_data
+            return pic
 
-        # OggOpus / Vorbis
-        mbp_key = None
-        for key in ('metadata_block_picture', 'METADATA_BLOCK_PICTURE'):
-            if key in tags:
-                mbp_key = key
-                break
-
-        if mbp_key:
-            orig = Picture(base64.b64decode(tags[mbp_key][0]))
-            orig.data   = pic_data
-            orig.mime   = mime
-            orig.width  = width
-            orig.height = height
-            audio.tags[mbp_key] = [base64.b64encode(orig.write()).decode('ascii')]
-            audio.save()
-            return True
-
-        # FLAC native
-        if hasattr(audio, 'pictures') and audio.pictures:
-            pic         = audio.pictures[0]
-            pic.data    = pic_data
-            pic.mime    = mime
-            pic.width   = width
-            pic.height  = height
+        # ── FLAC ─────────────────────────────────────────────────────────────
+        if isinstance(audio, FLAC):
             audio.clear_pictures()
-            audio.add_picture(pic)
+            audio.add_picture(_make_picture())
             audio.save()
             return True
 
-        # ID3 (MP3)
-        apic_keys = [k for k in tags.keys() if k.startswith('APIC:')]
-        if apic_keys:
-            for key in apic_keys:
-                audio.tags[key].data = pic_data
-                audio.tags[key].mime = mime
+        # ── OggOpus / OggVorbis ──────────────────────────────────────────────
+        if isinstance(audio, (OggOpus, OggVorbis)):
+            if audio.tags is None:
+                audio.add_tags()
+            audio.tags['metadata_block_picture'] = [
+                base64.b64encode(_make_picture().write()).decode('ascii')
+            ]
             audio.save()
             return True
 
-        # MP4/M4A
-        if 'covr' in tags:
-            from mutagen.mp4 import MP4Cover
+        # ── MP3 / ID3 ────────────────────────────────────────────────────────
+        if isinstance(audio, MP3):
+            if audio.tags is None:
+                audio.add_tags()
+            audio.tags.delall('APIC')
+            audio.tags.add(APIC(encoding=3, mime=mime, type=3, desc='Cover', data=pic_data))
+            audio.save()
+            return True
+
+        # ── MP4 / M4A ────────────────────────────────────────────────────────
+        if isinstance(audio, MP4):
+            if audio.tags is None:
+                audio.add_tags()
             fmt = MP4Cover.FORMAT_JPEG if mime in ('image/jpeg', 'image/jpg') else MP4Cover.FORMAT_PNG
-            audio.tags['covr'] = [MP4Cover(pic_data, imageformat=fmt)]
+            audio['covr'] = [MP4Cover(pic_data, imageformat=fmt)]
             audio.save()
             return True
 
@@ -365,6 +370,54 @@ def _write_cover_to_file(file_path: str, pic_data: bytes, mime: str, width: int,
     except Exception as e:
         print(f"  {Color.RED}Error writing cover to {os.path.basename(file_path)}: {e}{Color.ENDC}")
         return False
+
+
+def embed_file_cover_into_audio(image_path: str, audio_paths: List[str]) -> Tuple[int, int]:
+    """
+    Read *image_path* from disk, resize to at most COVER_MAX_SIZE px on the
+    longest side, and embed the result into each file in *audio_paths*.
+    Returns (succeeded, failed) counts.
+    """
+    if not os.path.exists(image_path):
+        print(f"  {Color.RED}Image not found: {image_path}{Color.ENDC}")
+        return 0, len(audio_paths)
+
+    try:
+        with open(image_path, 'rb') as fh:
+            raw = fh.read()
+    except OSError as e:
+        print(f"  {Color.RED}Cannot read image {os.path.basename(image_path)}: {e}{Color.ENDC}")
+        return 0, len(audio_paths)
+
+    ext  = os.path.splitext(image_path)[1].lower()
+    mime = 'image/jpeg' if ext in ('.jpg', '.jpeg') else 'image/png' if ext == '.png' else 'image/jpeg'
+
+    try:
+        new_data, new_mime, new_w, new_h = _resize_image_bytes(raw, mime, COVER_MAX_SIZE)
+    except ValueError:
+        # Already within limits — use as-is
+        new_data, new_mime = raw, mime
+        try:
+            img = Image.open(io.BytesIO(raw))
+            new_w, new_h = img.size
+        except Exception:
+            new_w = new_h = 0
+    except Exception as e:
+        print(f"  {Color.RED}Error resizing {os.path.basename(image_path)}: {e}{Color.ENDC}")
+        return 0, len(audio_paths)
+
+    ok = fail = 0
+    for apath in audio_paths:
+        if not os.path.exists(apath):
+            print(f"  {Color.RED}Audio file not found: {apath}{Color.ENDC}")
+            fail += 1
+            continue
+        if _write_cover_to_file(apath, new_data, new_mime, new_w, new_h):
+            ok += 1
+        else:
+            print(f"  {Color.RED}Unsupported format: {os.path.basename(apath)}{Color.ENDC}")
+            fail += 1
+    return ok, fail
 
 
 def _read_raw_cover(file_path: str):
@@ -428,6 +481,93 @@ def flatten_container_folder(dirpath: str, dirnames: List[str], general_warnings
         return False
 
 
+def _is_image_only_dir(dirpath: str) -> bool:
+    """Return True if *dirpath* is non-empty and contains only image files (no audio)."""
+    try:
+        entries = [e for e in os.listdir(dirpath) if not e.startswith('.')]
+    except OSError:
+        return False
+    if not entries:
+        return False
+    return all(e.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS) for e in entries)
+
+
+def _verify_image(fpath: str) -> bool:
+    """Return True if Pillow can open and verify the image at *fpath*."""
+    try:
+        with Image.open(fpath) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
+def collect_album_images(dirpath: str, filenames: List[str]) -> Tuple[List[Dict], List[str]]:
+    """
+    Collect all images belonging to an album folder:
+      - images at the root (from *filenames*)
+      - images inside any subdir whose entire content is images
+        (considered an artwork dir regardless of its name)
+
+    Returns:
+        image_infos  — list of dicts: filename, subdir (None=root or str),
+                       size_bytes, readable, ext
+        artwork_dirs — subdir names identified as image-only (all will be
+                       collapsed into ARTWORK_DIRNAME during planning)
+    """
+    image_infos : List[Dict] = []
+    artwork_dirs: List[str]  = []
+
+    for f in sorted(filenames):
+        if not f.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+            continue
+        fpath = os.path.join(dirpath, f)
+        try:
+            size = os.path.getsize(fpath)
+        except OSError:
+            size = 0
+        image_infos.append({
+            'filename':   f,
+            'subdir':     None,
+            'size_bytes': size,
+            'readable':   _verify_image(fpath),
+            'ext':        os.path.splitext(f)[1].lower(),
+        })
+
+    try:
+        subdirs = sorted(e.name for e in os.scandir(dirpath)
+                         if e.is_dir() and not e.name.startswith('.'))
+    except OSError:
+        subdirs = []
+
+    for sub in subdirs:
+        subpath = os.path.join(dirpath, sub)
+        if not _is_image_only_dir(subpath):
+            continue
+        artwork_dirs.append(sub)
+        try:
+            sub_files = sorted(os.listdir(subpath))
+        except OSError:
+            sub_files = []
+        for f in sub_files:
+            if not f.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                continue
+            fpath = os.path.join(subpath, f)
+            try:
+                size = os.path.getsize(fpath)
+            except OSError:
+                size = 0
+            image_infos.append({
+                'filename':   f,
+                'subdir':     sub,
+                'size_bytes': size,
+                'readable':   _verify_image(fpath),
+                'ext':        os.path.splitext(f)[1].lower(),
+            })
+
+    return image_infos, artwork_dirs
+
+
 def analyze_album_folder(dirpath: str, filenames: List[str]) -> Optional[Dict]:
     audio_files = [f for f in filenames if f.lower().endswith(SUPPORTED_EXTENSIONS)]
     if not audio_files:
@@ -460,7 +600,7 @@ def analyze_album_folder(dirpath: str, filenames: List[str]) -> Optional[Dict]:
     years = [md.get('year') for md in files_metadata if md.get('album') == most_common_album and md.get('year')]
     year  = Counter(years).most_common(1)[0][0] if years else None
 
-    images = [f for f in filenames if f.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS)]
+    image_infos, artwork_dirs = collect_album_images(dirpath, filenames)
 
     print(f"  {Color.GREEN}-> Found album: '{most_common_album}'{f' ({year})' if year else ''}{Color.ENDC}")
 
@@ -469,8 +609,9 @@ def analyze_album_folder(dirpath: str, filenames: List[str]) -> Optional[Dict]:
         'album':          most_common_album,
         'year':           year,
         'files_metadata': files_metadata,
-        'images':         images,
-        'has_images':     bool(images),
+        'image_infos':    image_infos,
+        'artwork_dirs':   artwork_dirs,
+        'has_images':     bool(image_infos),
         'album_warnings': sorted(list(set(album_warnings))),
     }
 
@@ -479,8 +620,18 @@ def check_warnings(info: Dict) -> List[str]:
     md_list  = info['files_metadata']
     warnings = set(info.get('album_warnings', []))
 
-    if not info['has_images']:
+    image_infos = info.get('image_infos', [])
+    if not image_infos:
         warnings.add("[No Image]")
+    elif len(image_infos) > 1:
+        has_folder = any(
+            os.path.splitext(img['filename'])[0].lower() == 'folder' and img['subdir'] is None
+            for img in image_infos
+        )
+        if not has_folder:
+            warnings.add("[Main Image Not Selected]")
+    if any(not img['readable'] for img in image_infos):
+        warnings.add("[Corrupt Image]")
     if any(m.get('track') == '0' or m.get('disc') == '0' for m in md_list):
         warnings.add("[Zero Metadata]")
     if any(m.get('invalid_year_tag') for m in md_list):
@@ -582,12 +733,99 @@ def plan_renames(info: Dict, final_name: str, ignore_disc: bool) -> List[Tuple[s
     return plan
 
 
+def plan_image_moves(info: Dict, album_dirpath: str) -> Tuple[List[Tuple[str,str]], Optional[str]]:
+    """
+    Build a list of (src, dst) rename/move operations for all images in *info*,
+    and return the chosen artwork subdir path (or None if no extras exist).
+
+    Rules:
+      - 0 images  → nothing to do
+      - 1 image   → rename to folder.<ext> at root (existing behaviour)
+      - 2+ images → the image whose filename was chosen as main (stored in
+                    info['chosen_main_image']) becomes folder.<ext> at root;
+                    all others go into ARTWORK_DIRNAME/ with names
+                    image-01.<ext>, image-02.<ext>, … (alphabetical order,
+                    always sorts after "folder").
+                    Any pre-existing image-only subdirs (artwork_dirs) that are
+                    not already named ARTWORK_DIRNAME are renamed to
+                    ARTWORK_DIRNAME (handled separately in plan step).
+
+    Returns (moves, artwork_subdir_path | None).
+    """
+    image_infos  = info.get('image_infos', [])
+    artwork_dirs = info.get('artwork_dirs', [])
+    dirpath      = info['path']
+
+    if not image_infos:
+        return [], None
+
+    if len(image_infos) == 1:
+        img       = image_infos[0]
+        src_path  = os.path.join(dirpath,
+                                 img['filename'] if img['subdir'] is None
+                                 else os.path.join(img['subdir'], img['filename']))
+        new_name  = f"folder{img['ext']}"
+        dst_path  = os.path.join(dirpath, new_name)
+        moves     = []
+        if os.path.normcase(src_path) != os.path.normcase(dst_path):
+            moves.append((src_path, dst_path))
+        return moves, None
+
+    # 2+ images
+    chosen_key = info.get('chosen_main_image')  # 'subdir/filename' or 'filename'
+    main_move  = []   # at most one entry; applied AFTER extras to avoid clobbering
+    art_path   = os.path.join(dirpath, ARTWORK_DIRNAME)
+
+    # Separate main from extras
+    extras = []
+    for img in image_infos:
+        key = img['filename'] if img['subdir'] is None else f"{img['subdir']}/{img['filename']}"
+        src = os.path.join(dirpath,
+                           img['filename'] if img['subdir'] is None
+                           else os.path.join(img['subdir'], img['filename']))
+        if key == chosen_key:
+            dst = os.path.join(dirpath, f"folder{img['ext']}")
+            if os.path.normcase(src) != os.path.normcase(dst):
+                main_move.append((src, dst))
+        else:
+            extras.append((img, src))
+
+    # Sort extras alphabetically by original filename for deterministic numbering
+    extras.sort(key=lambda x: x[0]['filename'].lower())
+
+    # Assign numbered names: image-01, image-02, … (always > "folder" alphabetically)
+    extra_moves = []
+    for idx, (img, src) in enumerate(extras, start=1):
+        new_name = f"image-{idx:02d}{img['ext']}"
+        dst = os.path.join(art_path, new_name)
+        # Guard against case collision with its own destination
+        if os.path.normcase(src) != os.path.normcase(dst):
+            extra_moves.append((src, dst))
+
+    # Extras are moved out first so the root slot is free before the new main arrives.
+    moves = extra_moves + main_move
+
+    return moves, art_path if extras else None
+
+
+def _safe_move(src: str, dst: str) -> None:
+    """os.rename with a case-only guard and parent-dir creation."""
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if os.path.normcase(src) == os.path.normcase(dst):
+        tmp = src + "__tmp_img_rename__"
+        os.rename(src, tmp)
+        os.rename(tmp, dst)
+    else:
+        os.rename(src, dst)
+
+
 def run_scan_and_plan(root_folders: List[str], options: Dict):
-    check_only  = options.get('check_only', False)
-    force_yes   = options.get('force_yes', False)
-    force_no    = options.get('force_no', False)
-    folder_only = options.get('folder_only', False)
-    interactive = options.get('interactive', True)
+    check_only     = options.get('check_only', False)
+    force_yes      = options.get('force_yes', False)
+    force_no       = options.get('force_no', False)
+    folder_only    = options.get('folder_only', False)
+    interactive    = options.get('interactive', True)
+    chosen_images  = options.get('_chosen_images', {})  # {album_path: chosen_key}
 
     general_warnings  = []
     warnings_by_album = {}
@@ -599,6 +837,12 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
         for dirpath, dirnames, filenames in os.walk(root_folder):
             if dirpath == root_folder:
                 continue
+
+            # Prune image-only subdirs from the walk so they are never mistaken
+            # for container folders and are never walked into as album dirs.
+            # collect_album_images() handles them directly from the parent.
+            dirnames[:] = [d for d in dirnames
+                           if not _is_image_only_dir(os.path.join(dirpath, d))]
 
             is_container = False
             if dirnames:
@@ -660,6 +904,7 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
     counters  = Counter()
 
     folder_rename_plan, file_rename_plan, tag_plan, cover_resize_plan = [], [], [], []
+    image_rename_plan, artwork_dir_rename_plan, embed_cover_plan = [], [], []
     preview_data   = []
     proposed_paths = set()
     folder_info.sort(key=lambda x: x['path'])
@@ -681,6 +926,11 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
             final_name = final_base
 
         final_path   = os.path.join(parent, final_name)
+
+        # Apply any user image choice from the web preview
+        if info['path'] in chosen_images:
+            info['chosen_main_image'] = chosen_images[info['path']]
+
         w            = check_warnings(info)
         has_critical = "[Track Gap]" in w or "[Duplicate Track]" in w
 
@@ -700,23 +950,75 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
                 for o, n in p_files:
                     file_map[os.path.basename(o)] = os.path.basename(n)
 
-            images = info.get('images', [])
-            if len(images) == 1:
-                img_name    = images[0]
-                _, img_ext  = os.path.splitext(img_name)
-                new_img_name = f"folder{img_ext}"
+            image_infos = info.get('image_infos', [])
 
-                if img_name.lower() != new_img_name.lower():
-                    old_img_path = os.path.join(info['path'], img_name)
-                    new_img_path = os.path.join(info['path'], new_img_name)
-                    file_rename_plan.append((old_img_path, new_img_path))
-                    file_map[img_name] = new_img_name
-                    planned_files.append((old_img_path, new_img_path))
-                    info['files_metadata'].append({
-                        'filename': img_name, 'track': '', 'title': '[Cover Art]',
-                        'artist': '', 'album': '', 'disc': '',
-                        'cover_art_count': 0, 'cover_art_hash': None,
-                    })
+            if len(image_infos) == 1:
+                # Single image: rename to folder.<ext> at root (existing behaviour)
+                img_moves, _ = plan_image_moves(info, final_path)
+                for o, n in img_moves:
+                    file_rename_plan.append((o, n))
+                    planned_files.append((o, n))
+                    file_map[os.path.basename(o)] = os.path.basename(n)
+                # Embed the cover into audio files that are missing it
+                if '[Missing Cover]' in w:
+                    img = image_infos[0]
+                    final_img_path = os.path.join(final_path, f"folder{img['ext']}")
+                    audio_final_paths = [
+                        os.path.join(final_path, file_map.get(m['filename'], m['filename']))
+                        for m in info['files_metadata']
+                    ]
+                    embed_cover_plan.append((final_img_path, audio_final_paths))
+
+            elif len(image_infos) > 1:
+                # Multiple images: only act if a main was chosen (preview mode)
+                chosen = info.get('chosen_main_image')
+
+                # CLI fallback: if no explicit selection but folder.* already exists
+                # at the album root, treat it as the main image so we can still embed.
+                if not chosen:
+                    folder_img = next(
+                        (img for img in image_infos
+                         if os.path.splitext(img['filename'])[0].lower() == 'folder'
+                         and img['subdir'] is None),
+                        None
+                    )
+                    if folder_img:
+                        chosen = folder_img['filename']
+                        info['chosen_main_image'] = chosen
+                if chosen:
+                    img_moves, _art_path = plan_image_moves(info, final_path)
+                    for o, n in img_moves:
+                        image_rename_plan.append((o, n))
+                        planned_files.append((o, n))
+                        src_rel = os.path.relpath(o, info['path'])
+                        dst_rel = os.path.relpath(n, info['path'])
+                        file_map[src_rel] = dst_rel
+
+                    # Rename pre-existing non-standard artwork dirs to ARTWORK_DIRNAME
+                    for adir in info.get('artwork_dirs', []):
+                        if adir != ARTWORK_DIRNAME:
+                            adir_src = os.path.join(info['path'], adir)
+                            adir_dst = os.path.join(info['path'], ARTWORK_DIRNAME)
+                            if not os.path.exists(adir_dst) or os.path.normcase(adir_src) == os.path.normcase(adir_dst):
+                                artwork_dir_rename_plan.append((adir_src, adir_dst))
+
+                    # If any audio files are missing embedded cover art, plan to embed
+                    # the chosen main image (at its post-move destination) into them.
+                    if '[Missing Cover]' in w:
+                        chosen_img_info = next(
+                            (img for img in image_infos
+                             if (img['filename'] if img['subdir'] is None
+                                 else f"{img['subdir']}/{img['filename']}") == chosen),
+                            None
+                        )
+                        if chosen_img_info:
+                            final_img_path = os.path.join(final_path, f"folder{chosen_img_info['ext']}")
+                            audio_final_paths = [
+                                os.path.join(final_path, file_map.get(m['filename'], m['filename']))
+                                for m in info['files_metadata']
+                            ]
+                            embed_cover_plan.append((final_img_path, audio_final_paths))
+                # else: no main chosen — warn already added in check_warnings, do nothing
 
         if info['path'] != final_path:
             # On case-insensitive filesystems (macOS, Windows) os.path.exists() returns
@@ -747,24 +1049,84 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
         for m in info['files_metadata']:
             orig = m['filename']
             p_files_list.append({'original': orig, 'new': file_map.get(orig, orig)})
+        # Also surface images in the file list for preview
+        for img in info.get('image_infos', []):
+            orig_rel = img['filename'] if img['subdir'] is None else f"{img['subdir']}/{img['filename']}"
+            p_files_list.append({'original': orig_rel, 'new': file_map.get(orig_rel, orig_rel), 'is_image': True})
         p_files_list.sort(key=lambda x: x['new'])
 
         has_changes = (info['path'] != final_path) or bool(planned_files) or redundant_disc
 
         preview_data.append({
-            'original_name': os.path.basename(info['path']),
-            'new_name':      final_name,
-            'warnings':      w,
-            'files':         p_files_list,
-            'has_changes':   has_changes,
+            'original_name':  os.path.basename(info['path']),
+            'new_name':       final_name,
+            'warnings':       w,
+            'files':          p_files_list,
+            'has_changes':    has_changes,
+            'image_infos':    info.get('image_infos', []),
+            'artwork_dirs':   info.get('artwork_dirs', []),
+            'album_path':     info['path'],
         })
 
     stats = {'changed_albums': sum(1 for p in preview_data if p['has_changes'])}
-    return preview_data, file_rename_plan, folder_rename_plan, tag_plan, cover_resize_plan, stats, general_warnings, warnings_by_album
+    return preview_data, file_rename_plan, folder_rename_plan, tag_plan, cover_resize_plan, image_rename_plan, artwork_dir_rename_plan, embed_cover_plan, stats, general_warnings, warnings_by_album
 
 
-def execute_changes(file_plan, folder_plan, tag_plan, cover_resize_plan=None, resize_covers=False):
+def execute_changes(file_plan, folder_plan, tag_plan, cover_resize_plan=None,
+                    resize_covers=False, image_rename_plan=None, artwork_dir_rename_plan=None,
+                    embed_cover_plan=None, embed_cover=False):
     print(f"\n{Color.HEADER}{Color.BOLD}--- Phase 3: Executing ---{Color.ENDC}")
+
+    if artwork_dir_rename_plan:
+        print(f"\n{Color.BOLD}Step 0a: Renaming artwork subdirectories...{Color.ENDC}")
+        dir_renames = {}  # old_dir_path -> new_dir_path
+        for o, n in artwork_dir_rename_plan:
+            try:
+                _safe_move(o, n)
+                print(f"  Dir: {os.path.basename(o)} -> {os.path.basename(n)}")
+                dir_renames[o] = n
+            except Exception as e:
+                print(f"  {Color.RED}Error renaming artwork dir: {e}{Color.ENDC}")
+
+        # Patch image source paths that now live under a renamed directory
+        if dir_renames and image_rename_plan:
+            updated = []
+            for o, n in image_rename_plan:
+                for old_dir, new_dir in dir_renames.items():
+                    if o.startswith(old_dir + os.sep):
+                        o = new_dir + o[len(old_dir):]
+                        break
+                updated.append((o, n))
+            image_rename_plan = updated
+
+    if image_rename_plan:
+        print(f"\n{Color.BOLD}Step 0b: Organising images...{Color.ENDC}")
+        # Resolve swap conflicts: if a move's destination is also a pending source,
+        # that file would be clobbered before it gets a chance to move.
+        # Pre-move it to a temp name and update the plan so the rest of the chain
+        # still works (handles arbitrary swap chains, not just pairs).
+        plan = list(image_rename_plan)
+        src_index = {os.path.normcase(o): i for i, (o, _) in enumerate(plan)}
+        for i, (o, n) in enumerate(plan):
+            nc_n = os.path.normcase(n)
+            if nc_n in src_index and os.path.exists(n):
+                _ext = os.path.splitext(n)[1]
+                _dir = os.path.dirname(os.path.abspath(n))
+                tmp_fd, tmp = tempfile.mkstemp(suffix=_ext, dir=_dir)
+                os.close(tmp_fd)
+                try:
+                    os.rename(n, tmp)
+                    j = src_index.pop(nc_n)
+                    plan[j] = (tmp, plan[j][1])
+                    src_index[os.path.normcase(tmp)] = j
+                except Exception as e:
+                    print(f"  {Color.RED}Error pre-moving {os.path.basename(n)}: {e}{Color.ENDC}")
+        for o, n in plan:
+            try:
+                _safe_move(o, n)
+                print(f"  Image: {os.path.relpath(o)} -> {os.path.relpath(n)}")
+            except Exception as e:
+                print(f"  {Color.RED}Error moving image {os.path.basename(o)}: {e}{Color.ENDC}")
 
     if tag_plan:
         print(f"\n{Color.BOLD}Step 1: Removing redundant disc tags...{Color.ENDC}")
@@ -803,8 +1165,17 @@ def execute_changes(file_plan, folder_plan, tag_plan, cover_resize_plan=None, re
             except Exception as e:
                 print(f"  {Color.RED}Error: {e}{Color.ENDC}")
 
+    if embed_cover and embed_cover_plan:
+        print(f"\n{Color.BOLD}Step 4: Embedding cover art into audio files...{Color.ENDC}")
+        for image_path, audio_paths in embed_cover_plan:
+            ok, fail = embed_file_cover_into_audio(image_path, audio_paths)
+            status = f"{Color.GREEN}✓{Color.ENDC} {os.path.basename(image_path)} → {ok} file(s) embedded"
+            if fail:
+                status += f"  {Color.RED}({fail} failed){Color.ENDC}"
+            print(f"  {status}")
+
     if resize_covers and cover_resize_plan:
-        print(f"\n{Color.BOLD}Step 4: Resizing oversized cover art (max {COVER_MAX_SIZE}px)...{Color.ENDC}")
+        print(f"\n{Color.BOLD}Step 5: Resizing oversized cover art (max {COVER_MAX_SIZE}px)...{Color.ENDC}")
 
         # Group files by cover hash so each unique image is resized exactly once.
         by_hash: Dict[str, List[str]] = {}
@@ -853,14 +1224,34 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
         if self.path == '/apply':
             content_length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(content_length)) if content_length else {}
-            resize_covers = body.get('resize_covers', False)
+            resize_covers   = body.get('resize_covers', False)
+            embed_cover     = body.get('embed_cover', False)
+            chosen_images   = body.get('chosen_images', {})  # {album_path: "subdir/filename" or "filename"}
+
+            # Inject user image choices back into preview data so re-planning picks them up
+            for album in self.data['preview']:
+                key = album.get('album_path', '')
+                if key in chosen_images:
+                    album['chosen_main_image'] = chosen_images[key]
+
+            # Re-run planning with choices embedded so image plans reflect selections
+            opts = self.data['options'].copy()
+            opts['interactive'] = False
+            opts['_chosen_images'] = chosen_images
+            p_data, f_plan, d_plan, t_plan, cov_plan, img_plan, adir_plan, emb_plan, stats, _, _ = run_scan_and_plan(
+                self.data['roots'], opts)
+
             self.send_response(200)
             self.end_headers()
             print(f"\n{Color.CYAN}[Web] Applying changes...{Color.ENDC}")
             execute_changes(
-                self.data['file_plan'], self.data['folder_plan'], self.data['tag_plan'],
-                cover_resize_plan=self.data['cover_resize_plan'],
+                f_plan, d_plan, t_plan,
+                cover_resize_plan=cov_plan,
                 resize_covers=resize_covers,
+                image_rename_plan=img_plan,
+                artwork_dir_rename_plan=adir_plan,
+                embed_cover_plan=emb_plan,
+                embed_cover=embed_cover,
             )
             threading.Thread(target=self.server.shutdown).start()
 
@@ -874,9 +1265,11 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
             print(f"\n{Color.BLUE}[Web] Re-checking files...{Color.ENDC}")
             opts = self.data['options'].copy()
             opts['interactive'] = False
-            p_data, f_plan, d_plan, t_plan, cov_plan, stats, _, _ = run_scan_and_plan(self.data['roots'], opts)
+            p_data, f_plan, d_plan, t_plan, cov_plan, img_plan, adir_plan, emb_plan, stats, _, _ = run_scan_and_plan(self.data['roots'], opts)
             self.data.update({'preview': p_data, 'file_plan': f_plan, 'folder_plan': d_plan,
-                              'tag_plan': t_plan, 'cover_resize_plan': cov_plan, 'stats': stats})
+                              'tag_plan': t_plan, 'cover_resize_plan': cov_plan,
+                              'image_rename_plan': img_plan, 'artwork_dir_rename_plan': adir_plan,
+                              'embed_cover_plan': emb_plan, 'stats': stats})
             self.send_response(200)
             self.end_headers()
             print(f"{Color.GREEN}[Web] Re-check complete. Updating view.{Color.ENDC}")
@@ -900,12 +1293,54 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
 
             files_html = ""
             for f in album['files']:
+                icon     = "🖼" if f.get('is_image') else "🎵"
                 f_txt    = html.escape(f['new'])
                 li_class = ""
                 if f['original'] != f['new']:
                     f_txt    = f"<span class='old-file'>{html.escape(f['original'])}</span> <span class='new-file'>{f_txt}</span>"
                     li_class = "f-changed"
-                files_html += f"<li class='{li_class}'><span class='f-icon'>🎵</span> {f_txt}</li>"
+                files_html += f"<li class='{li_class}'><span class='f-icon'>{icon}</span> {f_txt}</li>"
+
+            # Image selector — shown whenever there are 2+ images
+            image_infos  = album.get('image_infos', [])
+            album_path   = album.get('album_path', '')
+            img_selector = ""
+            if len(image_infos) >= 2:
+                # Determine which image is currently the folder.* (pre-selected)
+                current_folder = next(
+                    (img for img in image_infos
+                     if img['subdir'] is None and
+                        os.path.splitext(img['filename'])[0].lower() == 'folder'),
+                    None
+                )
+                safe_path = html.escape(album_path, quote=True)
+                options_html = ""
+                for img in sorted(image_infos, key=lambda x: (x['subdir'] or '', x['filename'].lower())):
+                    key      = img['filename'] if img['subdir'] is None else f"{img['subdir']}/{img['filename']}"
+                    label    = key
+                    extra    = ""
+                    if not img['readable']:
+                        extra += " <span class='img-corrupt'>[Corrupt]</span>"
+                    is_cur   = current_folder and img is current_folder
+                    checked  = "checked" if is_cur else ""
+                    cur_tag  = " <span class='img-current'>[current folder.*]</span>" if is_cur else ""
+                    options_html += f"""
+                    <label class='img-option{"  img-option-current" if is_cur else ""}'>
+                        <input type='radio' name='img_{safe_path}' value='{html.escape(key, quote=True)}' {checked}
+                               onchange='imgPick("{safe_path}", this.value, {i})'>
+                        <span class='img-label'>{html.escape(label)}{cur_tag}{extra}</span>
+                    </label>"""
+                img_selector = f"""
+                <div class='img-selector' id='imgsel-{i}'>
+                    <div class='img-selector-title'>🖼 Pick main image <span class='img-hint'>(others → artwork/)</span></div>
+                    <div class='img-options'>{options_html}
+                    <label class='img-option'>
+                        <input type='radio' name='img_{safe_path}' value=''
+                               onchange='imgPick("{safe_path}", "", {i})'>
+                        <span class='img-label img-none'>— Leave images as-is —</span>
+                    </label>
+                    </div>
+                </div>"""
 
             rows += f"""
             <div class="{card_class}" id="card-{i}">
@@ -920,6 +1355,7 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                     </div>
                 </div>
                 <div id="ul-{i}" class="file-list">
+                    {img_selector}
                     <ul>{files_html}</ul>
                 </div>
             </div>"""
@@ -988,6 +1424,17 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                 .new-file {{ color: var(--accent); }}
                 #status {{ font-size: 0.9em; color: var(--accent); font-weight: 600; animation: pulse 1.5s infinite; display: none; margin-right: 15px; }}
                 @keyframes pulse {{ 0% {{ opacity: 0.6; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.6; }} }}
+                .img-selector {{ padding: 10px 20px 6px 20px; border-bottom: 1px solid var(--border); }}
+                .img-selector-title {{ font-size: 0.82em; font-weight: 600; color: var(--subtext); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }}
+                .img-hint {{ font-weight: 400; text-transform: none; letter-spacing: 0; color: #666; }}
+                .img-options {{ display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 4px; }}
+                .img-option {{ display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-size: 0.85em; font-family: 'Roboto Mono', monospace; color: var(--subtext); transition: border-color 0.15s, background 0.15s; }}
+                .img-option:hover {{ border-color: var(--accent); background: rgba(76,175,80,0.05); color: var(--text); }}
+                .img-option-current {{ border-color: #555; color: var(--text); }}
+                .img-option input[type=radio] {{ accent-color: var(--accent); margin: 0; }}
+                .img-current {{ color: var(--accent); font-size: 0.85em; }}
+                .img-corrupt {{ color: var(--danger); font-size: 0.85em; }}
+                .img-none {{ color: #666; font-style: italic; }}
             </style>
             <script>
                 function toggle(id) {{
@@ -1001,6 +1448,22 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                         chev.classList.add('rotate');
                     }}
                 }}
+                var chosenImages = {{}};
+                function imgPick(albumPath, value, cardIdx) {{
+                    if (value === '') {{
+                        delete chosenImages[albumPath];
+                    }} else {{
+                        chosenImages[albumPath] = value;
+                    }}
+                    var card = document.getElementById('card-' + cardIdx);
+                    if (card) {{
+                        card.querySelectorAll('.badge').forEach(function(b) {{
+                            if (b.textContent === '[Main Image Not Selected]') {{
+                                b.style.display = value ? 'none' : '';
+                            }}
+                        }});
+                    }}
+                }}
                 function post(url) {{
                     var statusEl = document.getElementById('status');
                     if (url === '/recheck') {{
@@ -1010,8 +1473,9 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                     var opts = {{method:'POST'}};
                     if (url === '/apply') {{
                         var resizeCovers = document.getElementById('resize-covers').checked;
+                        var embedCover   = document.getElementById('embed-cover').checked;
                         opts.headers = {{'Content-Type': 'application/json'}};
-                        opts.body    = JSON.stringify({{resize_covers: resizeCovers}});
+                        opts.body    = JSON.stringify({{resize_covers: resizeCovers, embed_cover: embedCover, chosen_images: chosenImages}});
                     }}
                     fetch(url, opts).then(() => {{
                         if (url === '/recheck') location.reload();
@@ -1040,6 +1504,7 @@ class AudioPreviewServer(BaseHTTPRequestHandler):
                     <span id="status"></span>
                     <label class="switch-label"><input type="checkbox" id="chk" onclick="filter()"> Changes Only</label>
                     <label class="switch-label"><input type="checkbox" id="resize-covers" {'checked' if d['options'].get('cover_size') else ''}> Resize Covers (&gt;{COVER_MAX_SIZE}px)</label>
+                    <label class="switch-label"><input type="checkbox" id="embed-cover" checked> Embed cover <span style="font-size:0.85em;opacity:0.7">[Missing Cover]</span></label>
                     <button class="btn-re" onclick="post('/recheck')">↻ Re-check</button>
                     <button class="btn-no" onclick="post('/shutdown')">Cancel</button>
                     <button class="btn-go" onclick="post('/apply')">PROCEED →</button>
@@ -1061,13 +1526,15 @@ def organize_music_folders(roots: List[str], **kwargs):
         if not os.path.exists(root):
             return print(f"Folder not found: {root}")
 
-    p_data, f_plan, d_plan, t_plan, cov_plan, stats, warns, alb_warns = run_scan_and_plan(roots, kwargs)
+    p_data, f_plan, d_plan, t_plan, cov_plan, img_plan, adir_plan, emb_plan, stats, warns, alb_warns = run_scan_and_plan(roots, kwargs)
 
     if kwargs.get('preview_mode'):
         print(f"\n{Color.CYAN}Starting Web Preview...{Color.ENDC}")
         AudioPreviewServer.data = {
             'preview': p_data, 'file_plan': f_plan, 'folder_plan': d_plan,
             'tag_plan': t_plan, 'cover_resize_plan': cov_plan,
+            'image_rename_plan': img_plan, 'artwork_dir_rename_plan': adir_plan,
+            'embed_cover_plan': emb_plan,
             'stats': stats, 'roots': roots, 'options': kwargs,
         }
         try:
@@ -1081,14 +1548,18 @@ def organize_music_folders(roots: List[str], **kwargs):
             print("Port 8000 in use.")
         return
 
-    if not f_plan and not d_plan and not warns and not alb_warns:
+    if not f_plan and not d_plan and not img_plan and not adir_plan and not warns and not alb_warns:
         print(f"\n{Color.GREEN}No changes needed.{Color.ENDC}")
     elif kwargs.get('check_only'):
         print(f"\n{Color.YELLOW}Check-only mode.{Color.ENDC}")
     else:
         execute_changes(f_plan, d_plan, t_plan,
                         cover_resize_plan=cov_plan,
-                        resize_covers=kwargs.get('cover_size', False))
+                        resize_covers=kwargs.get('cover_size', False),
+                        image_rename_plan=img_plan,
+                        artwork_dir_rename_plan=adir_plan,
+                        embed_cover_plan=emb_plan,
+                        embed_cover=True)
 
     if warns or alb_warns:
         print(f"\n{Color.HEADER}--- Warnings ---{Color.ENDC}")

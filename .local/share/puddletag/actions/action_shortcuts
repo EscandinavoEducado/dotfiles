@@ -1,0 +1,10 @@
+{
+  "Shortcut0": {
+    "name": "Clean Metadata",
+    "filenames": [
+      "/home/salty/.local/share/puddletag/actions/Clean Metadata.action",
+      "/home/salty/.local/share/puddletag/actions/Sanitize track.action",
+      "/home/salty/.local/share/puddletag/actions/Sanitize year.action"
+    ]
+  }
+}

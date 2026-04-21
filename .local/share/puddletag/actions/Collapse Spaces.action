@@ -1,0 +1,20 @@
+{
+  "info": {
+    "name": "Collapse Spaces"
+  },
+  "Func0": {
+    "fields": [
+      "title",
+      "album",
+      "artist",
+      "albumartist"
+    ],
+    "func_name": "replaceWithReg",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "\\s+",
+      " ",
+      false
+    ]
+  }
+}

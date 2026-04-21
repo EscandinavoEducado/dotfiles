@@ -32,7 +32,7 @@ from typing import Optional, List, Tuple
 
 # ── shared library ────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path.home() / ".local" / "lib"))
-import aud_opus_lib as lib
+import aud_convert_lib as lib
 console = lib.console
 
 # ── mutagen (format-specific pieces not in the lib) ───────────────────────────

@@ -1,24 +1,57 @@
 #!/usr/bin/env bash
 
 cue_file=$(ls *.cue 2>/dev/null | head -n 1)
-audio_file=$(ls *.flac 2>/dev/null | head -n 1)
+audio_file=$(ls *.flac *.wav *.ape 2>/dev/null | head -n 1)
 
 if [ -z "$cue_file" ] || [ -z "$audio_file" ]; then
     echo "Error: CUE or audio file missing."
     exit 1
 fi
 
-mv "$audio_file" "$audio_file.bak"
+decoded_wav=""
+if [[ "$audio_file" == *.ape ]]; then
+    decoded_wav="${audio_file%.ape}.wav"
+    echo "APE detected — decoding to WAV via ffmpeg..."
+    ffmpeg -v error -i "$audio_file" "$decoded_wav"
+    if [ $? -ne 0 ] || [ ! -s "$decoded_wav" ]; then
+        echo "Error: ffmpeg failed to decode APE file."
+        rm -f "$decoded_wav"
+        exit 1
+    fi
+    split_source="$decoded_wav"
+else
+    split_source="$audio_file"
+fi
 
-shnsplit -f "$cue_file" -t "%n - %t" -o flac "$audio_file.bak"
+mv "$split_source" "$split_source.bak"
+
+shnsplit -f "$cue_file" -t "%n - %t" -o flac "$split_source.bak"
+split_status=$?
+
 rm -f *pregap*.flac 2>/dev/null
 
+if [ $split_status -ne 0 ]; then
+    echo "Error: shnsplit failed — restoring original file."
+    mv "$split_source.bak" "$split_source"
+    [ -n "$decoded_wav" ] && rm -f "$decoded_wav"
+    exit 1
+fi
+
 cuetag.sh "$cue_file" *.flac
+if [ $? -ne 0 ]; then
+    echo "Error: cuetag.sh failed — preserving original files."
+    mv "$split_source.bak" "$split_source"
+    [ -n "$decoded_wav" ] && rm -f "$decoded_wav"
+    exit 1
+fi
 
 if [ "$1" = "rm" ]; then
-    rm "$audio_file.bak"
+    rm "$split_source.bak"
+    [ -n "$decoded_wav" ] && rm -f "$audio_file"
     rm "$cue_file"
     echo "Original file and CUE removed."
 else
-    mv "$audio_file.bak" "$audio_file"
+    mv "$split_source.bak" "$split_source"
+    [ -n "$decoded_wav" ] && rm -f "$decoded_wav"
 fi
+

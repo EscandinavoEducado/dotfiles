@@ -352,7 +352,7 @@ def _write_cover_to_file(file_path: str, pic_data: bytes, mime: str, width: int,
             if audio.tags is None:
                 audio.add_tags()
             audio.tags.delall('APIC')
-            audio.tags.add(APIC(encoding=3, mime=mime, type=3, desc='Cover', data=pic_data))
+            audio.tags.add(APIC(encoding=3, mime=mime, type=3, desc='', data=pic_data))
             audio.save()
             return True
 

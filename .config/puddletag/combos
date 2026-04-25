@@ -2,7 +2,8 @@
   "For &Mixed Case, after any of:": {
     "values": [
       "., !",
-      "., !/"
+      "., !/",
+      ""
     ]
   },
   "filter_text": {

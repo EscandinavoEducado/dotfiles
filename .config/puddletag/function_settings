@@ -51,5 +51,14 @@
     "fields": [
       "__image"
     ]
+  },
+  "puddlestuff.functions_titleCase": {
+    "arguments": [
+      "Mixed Case",
+      ""
+    ],
+    "fields": [
+      "title"
+    ]
   }
 }

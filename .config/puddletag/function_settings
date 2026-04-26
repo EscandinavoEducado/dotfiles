@@ -37,13 +37,13 @@
   },
   "puddlestuff.functions_replace": {
     "arguments": [
-      "\\\\",
-      " / ",
+      "\u2044",
+      "/",
       false,
       false
     ],
     "fields": [
-      "artist"
+      "__all"
     ]
   },
   "puddlestuff.functions_remove_fields": {

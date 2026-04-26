@@ -11,5 +11,18 @@
     "arguments": [
       "artist;album;title;track;year;discnumber;albumartist;__image"
     ]
+  },
+  "Func1": {
+    "fields": [
+      "__all"
+    ],
+    "func_name": "replace",
+    "module": "puddlestuff.functions",
+    "arguments": [
+      "\u2044",
+      "/",
+      false,
+      false
+    ]
   }
 }

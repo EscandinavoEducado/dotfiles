@@ -7,7 +7,7 @@
 # ]
 # ///
 """
-aud-mp3-to-opus — Batch convert MP3 files to Opus with full metadata preservation.
+aud-mp3-to-opus — Batch convert MP3, Ogg Vorbis, and AAC files to Opus with full metadata preservation.
 
 Usage:
     aud-mp3-to-opus                              # converts current directory
@@ -37,6 +37,8 @@ console = lib.console
 _missing = []
 try:
     from mutagen.mp3 import MP3
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
     from mutagen.flac import Picture
     from mutagen import File as MutagenFile
 except ImportError:
@@ -62,7 +64,13 @@ DURATION_TOLS     = 2.0
 
 convert = lib.convert  # ffmpeg invocation is identical for all source formats
 
-def find_mp3_files(folders: List[Path]) -> List[Path]:
+SOURCE_GLOB_PATTERNS = [
+    "*.[mM][pP]3",
+    "*.[oO][gG][gG]",
+    "*.[mM][4Aa][aA]",   # .m4a and .aac
+]
+
+def find_source_files(folders: List[Path]) -> List[Path]:
     found: List[Path] = []
     for folder in folders:
         if not folder.exists():
@@ -71,8 +79,10 @@ def find_mp3_files(folders: List[Path]) -> List[Path]:
         if not folder.is_dir():
             console.print(f"  [red]✗[/red] Not a directory: [bold]{folder}[/bold]")
             continue
-        mp3s = sorted(folder.rglob("*.[mM][pP]3"))
-        found.extend(mp3s)
+        matches: List[Path] = []
+        for pattern in SOURCE_GLOB_PATTERNS:
+            matches.extend(folder.rglob(pattern))
+        found.extend(sorted(set(matches)))
     return found
 
 
@@ -93,8 +103,8 @@ def get_true_duration(path: Path) -> float:
         pass
     return 0.0
 
-def get_mp3_info(path: Path) -> dict:
-    """Read bitrate, duration, tag presence, and cover art flag from an MP3."""
+def get_source_info(path: Path) -> dict:
+    """Read bitrate, duration, tag presence, and cover art flag from an MP3, Ogg Vorbis, or AAC file."""
     info = {
         "bitrate_kbps": DEFAULT_BITRATE,
         "duration":     0.0,
@@ -102,81 +112,150 @@ def get_mp3_info(path: Path) -> dict:
         "has_tags":     False,
         "tag_snapshot": {},
     }
+    suffix = path.suffix.lower()
     try:
-        audio = MP3(path)
+        if suffix == ".mp3":
+            audio = MP3(path)
+            true_dur = get_true_duration(path)
+            info["duration"] = true_dur if true_dur > 0 else audio.info.length
+            info["bitrate_kbps"] = max(1, audio.info.bitrate // 1000)
+            if audio.tags:
+                info["has_tags"] = True
+                for key, val in audio.tags.items():
+                    info["tag_snapshot"][key] = str(val)
+                info["has_cover"] = any(k.startswith("APIC") for k in audio.tags)
 
-        true_dur = get_true_duration(path)
-        info["duration"] = true_dur if true_dur > 0 else audio.info.length
+        elif suffix == ".ogg":
+            audio = OggVorbis(path)
+            info["duration"] = audio.info.length
+            info["bitrate_kbps"] = max(1, (audio.info.bitrate or DEFAULT_BITRATE * 1000) // 1000)
+            if audio.tags:
+                info["has_tags"] = True
+                for key, val in audio.tags.items():
+                    info["tag_snapshot"][key] = str(val[0]) if isinstance(val, list) else str(val)
+                info["has_cover"] = "metadata_block_picture" in (audio.tags or {})
 
-        info["bitrate_kbps"] = max(1, audio.info.bitrate // 1000)
+        elif suffix in (".m4a", ".aac"):
+            audio = MP4(path)
+            info["duration"] = audio.info.length
+            info["bitrate_kbps"] = max(1, (audio.info.bitrate or DEFAULT_BITRATE * 1000) // 1000)
+            if audio.tags:
+                info["has_tags"] = True
+                for key, val in audio.tags.items():
+                    if key == "covr":
+                        continue
+                    # MP4 tag values are always lists; unwrap the first element.
+                    item = val[0] if isinstance(val, list) and val else val
+                    # trkn / disk are (number, total) tuples — keep just the number.
+                    if isinstance(item, tuple):
+                        item = item[0]
+                    info["tag_snapshot"][key] = str(item)
+                info["has_cover"] = "covr" in audio.tags
 
-        if audio.tags:
-            info["has_tags"] = True
-            for key, val in audio.tags.items():
-                info["tag_snapshot"][key] = str(val)
-            # APIC = Attached Picture (cover art in ID3)
-            info["has_cover"] = any(k.startswith("APIC") for k in audio.tags)
     except Exception as e:
-        console.print(f"  [yellow]⚠[/yellow]  Could not read MP3 info for {path.name}: {e}")
+        console.print(f"  [yellow]⚠[/yellow]  Could not read info for {path.name}: {e}")
     return info
 
 def target_bitrate(source_kbps: int) -> int:
     raw = round(source_kbps * BITRATE_RATIO)
     return max(MIN_BITRATE_KBPS, min(MAX_BITRATE_KBPS, raw))
 
-def embed_cover_art(mp3: Path, opus: Path) -> bool:
+def embed_cover_art(src: Path, opus: Path) -> bool:
     """
-    Extract APIC cover art from the MP3's ID3 tags and embed it into the Opus
-    file as a base64-encoded METADATA_BLOCK_PICTURE Vorbis comment.
+    Extract cover art from the source file and embed it into the Opus file
+    as a base64-encoded METADATA_BLOCK_PICTURE Vorbis comment.
+    Supports MP3 (ID3 APIC), Ogg Vorbis (METADATA_BLOCK_PICTURE), and AAC/M4A (covr).
     """
+    suffix = src.suffix.lower()
     try:
-        mp3_audio = MP3(mp3)
-        if not mp3_audio.tags:
-            return False
-
-        apic = None
-        for key in mp3_audio.tags:
-            if key.startswith("APIC"):
-                apic = mp3_audio.tags[key]
-                break
-        if apic is None:
-            return False
-
         pic = Picture()
-        pic.data  = apic.data
-        pic.type  = apic.type   # 3 = front cover
-        pic.mime  = apic.mime
-        pic.desc  = apic.desc or ""
-        pic.width = pic.height = pic.depth = pic.colors = 0
+
+        if suffix == ".mp3":
+            src_audio = MP3(src)
+            if not src_audio.tags:
+                return False
+            apic = None
+            for key in src_audio.tags:
+                if key.startswith("APIC"):
+                    apic = src_audio.tags[key]
+                    break
+            if apic is None:
+                return False
+            pic.data  = apic.data
+            pic.type  = apic.type
+            pic.mime  = apic.mime
+            pic.desc  = apic.desc or ""
+            pic.width = pic.height = pic.depth = pic.colors = 0
+
+        elif suffix == ".ogg":
+            import base64 as _base64
+            src_audio = OggVorbis(src)
+            raw = (src_audio.tags or {}).get("metadata_block_picture")
+            if not raw:
+                return False
+            pic = Picture(_base64.b64decode(raw[0]))
+
+        elif suffix in (".m4a", ".aac"):
+            src_audio = MP4(src)
+            covr = (src_audio.tags or {}).get("covr")
+            if not covr:
+                return False
+            atom = covr[0]
+            from mutagen.mp4 import MP4Cover
+            pic.data   = bytes(atom)
+            pic.type   = 3  # front cover
+            pic.mime   = "image/jpeg" if atom.imageformat == MP4Cover.FORMAT_JPEG else "image/png"
+            pic.desc   = ""
+            pic.width  = pic.height = pic.depth = pic.colors = 0
+
+        else:
+            return False
 
         return lib.embed_picture_in_opus(pic, opus)
     except Exception:
         return False
 
-def verify(mp3: Path, opus: Path, mp3_info: dict) -> Tuple[bool, List[str]]:
+def verify(src: Path, opus: Path, src_info: dict) -> Tuple[bool, List[str]]:
     """
     Sanity-check the converted Opus file. Returns (ok, list_of_issues).
     Checks: file exists & non-empty, duration, cover art, key tags.
     """
-    ok, issues, af = lib.verify_opus_basics(opus, mp3_info, DURATION_TOLS)
+    ok, issues, af = lib.verify_opus_basics(opus, src_info, DURATION_TOLS)
     if af is None:
         return ok, issues
 
-    # MP3 sources use ID3 keys; map them to Vorbis equivalents for comparison.
-    id3_to_vorbis = {
-        "TIT2": "title",
-        "TPE1": "artist",
-        "TALB": "album",
-        "TRCK": "tracknumber",
-        "TDRC": "date",
-    }
-
+    suffix = src.suffix.lower()
     tags = af.tags or {}
-    snap = mp3_info["tag_snapshot"]
-    for id3_key, vorbis_key in id3_to_vorbis.items():
-        if id3_key not in snap:
+    snap = src_info["tag_snapshot"]
+
+    if suffix == ".mp3":
+        # MP3 sources use ID3 keys; map them to Vorbis equivalents for comparison.
+        key_map = {
+            "TIT2": "title",
+            "TPE1": "artist",
+            "TALB": "album",
+            "TRCK": "tracknumber",
+            "TDRC": "date",
+        }
+    elif suffix == ".ogg":
+        # Vorbis tags are already Vorbis-comment keys; compare directly.
+        key_map = {k: k for k in ("title", "artist", "album", "tracknumber", "date")}
+    elif suffix in (".m4a", ".aac"):
+        # MP4/iTunes atom names → Vorbis comment equivalents.
+        key_map = {
+            "\xa9nam": "title",
+            "\xa9ART": "artist",
+            "\xa9alb": "album",
+            "trkn":    "tracknumber",
+            "\xa9day": "date",
+        }
+    else:
+        key_map = {}
+
+    for src_key, vorbis_key in key_map.items():
+        if src_key not in snap:
             continue
-        src_val = str(snap[id3_key]).strip()
+        src_val = str(snap[src_key]).strip()
         dst_val = ""
         if vorbis_key in tags:
             v = tags[vorbis_key]
@@ -199,7 +278,7 @@ list_and_select  = lib.list_and_select
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="aud-mp3-to-opus",
-        description="Batch-convert MP3 → Opus. Copies metadata & cover art, "
+        description="Batch-convert MP3, Ogg Vorbis, and AAC → Opus. Copies metadata & cover art, "
                     "targets 70%% of source bitrate, verifies before deleting originals.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -222,7 +301,7 @@ examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would happen without converting anything")
     parser.add_argument("--keep-originals", action="store_true",
-                        help="Do not delete MP3 files after successful conversion")
+                        help="Do not delete source files after successful conversion")
     parser.add_argument("--no-verify", action="store_true",
                         help="Skip post-conversion verification (faster, riskier)")
     parser.add_argument("--skip-existing", action="store_true", default=True,
@@ -261,7 +340,7 @@ examples:
     if args.no_verify:       flags.append("no verify")
     subtitle = "  ·  ".join(flags) if flags else "verify → delete originals"
     console.print(Panel.fit(
-        f"[bold cyan]MP3 → Opus[/bold cyan]   [dim]{subtitle}[/dim]",
+        f"[bold cyan]MP3 / Vorbis / AAC → Opus[/bold cyan]   [dim]{subtitle}[/dim]",
         border_style="cyan",
         padding=(0, 2),
     ))
@@ -272,16 +351,16 @@ examples:
                       "Install it and make sure it is on your PATH.")
         sys.exit(1)
 
-    with console.status("[bold]Scanning for MP3 files…[/bold]", spinner="dots"):
-        mp3_files = find_mp3_files(args.folders)
+    with console.status("[bold]Scanning for MP3 / Vorbis / AAC files…[/bold]", spinner="dots"):
+        mp3_files = find_source_files(args.folders)
 
     if not mp3_files:
-        console.print("[yellow]No MP3 files found.[/yellow]")
+        console.print("[yellow]No MP3, Ogg Vorbis, or AAC files found.[/yellow]")
         sys.exit(0)
 
     total_bytes = sum(f.stat().st_size for f in mp3_files)
     console.print(
-        f"[green]●[/green] Found [bold]{len(mp3_files)}[/bold] MP3 file(s)  "
+        f"[green]●[/green] Found [bold]{len(mp3_files)}[/bold] source file(s)  "
         f"[dim]({lib.fmt_size(total_bytes)} total)[/dim]"
     )
     console.print()
@@ -290,7 +369,7 @@ examples:
         console.print(Rule("[bold yellow]DRY RUN — nothing will be written[/bold yellow]"))
         console.print()
         for mp3 in mp3_files:
-            info = get_mp3_info(mp3)
+            info = get_source_info(mp3)
             tb   = target_bitrate(info["bitrate_kbps"])
             cov  = " [dim]🖼[/dim]" if info["has_cover"] else ""
             console.print(
@@ -328,7 +407,7 @@ examples:
                 prog.update(task, description=f"[dim]{label}[/dim]")
 
             if args.skip_existing and opus.exists():
-                mp3_info = get_mp3_info(mp3)
+                mp3_info = get_source_info(mp3)
                 valid, _ = verify(mp3, opus, mp3_info)
                 if valid:
                     prog.print(f"  [yellow]⏭[/yellow]  [dim]{name}[/dim]  [dim](opus exists)[/dim]")
@@ -343,7 +422,7 @@ examples:
                     )
                     opus.unlink()
             else:
-                mp3_info = get_mp3_info(mp3)
+                mp3_info = get_source_info(mp3)
 
             kbps     = target_bitrate(mp3_info["bitrate_kbps"])
             mp3_size = mp3.stat().st_size

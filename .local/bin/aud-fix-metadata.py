@@ -359,14 +359,14 @@ HTML_TEMPLATE = """
         button:hover { opacity: 0.9; }
         button.cancel { background: #cf6679; }
 
-        .grid { display: grid; grid-template-columns: 40px 80px 1fr 1fr 60px; gap: 10px; margin-top: 20px; align-items: center; }
+        .grid { display: grid; grid-template-columns: 40px 80px 1fr 1fr 60px; gap: 10px; margin-top: 20px; align-items: stretch; }
         .header { font-weight: bold; color: #888; border-bottom: 1px solid #444; padding-bottom: 5px; }
 
         .row { display: contents; }
         .row:hover .cell { background: #2c2c2c; }
-        .cell { padding: 10px; background: var(--surface); border-radius: 4px; display: flex; align-items: center; }
+        .cell { padding: 10px; background: var(--surface); border-radius: 4px; display: flex; align-items: center; word-break: break-word; min-width: 0; }
 
-        input[type="text"] { width: 100%; background: #333; border: 1px solid #555; color: #fff; padding: 5px; border-radius: 3px; }
+        input[type="text"], textarea.new-input { width: 100%; background: #333; border: 1px solid #555; color: #fff; padding: 5px; border-radius: 3px; box-sizing: border-box; min-width: 0; font-family: inherit; font-size: inherit; resize: none; overflow: hidden; }
         input[type="checkbox"] { transform: scale(1.5); accent-color: var(--primary); cursor: pointer; margin: 0 auto; }
 
         .badge { background: #333; padding: 4px 8px; border-radius: 4px; font-size: 0.75em; color: #aaa; font-weight: bold; text-transform: uppercase; width: 50px; text-align: center; display: inline-block; }
@@ -443,6 +443,12 @@ HTML_TEMPLATE = """
                 window.close();
             });
         }
+
+        // Auto-resize all textareas to fit their initial content
+        document.querySelectorAll('textarea.new-input').forEach(ta => {
+            ta.style.height = 'auto';
+            ta.style.height = ta.scrollHeight + 'px';
+        });
     </script>
 </body>
 </html>
@@ -484,14 +490,15 @@ class PreviewServer(BaseHTTPRequestHandler):
                         <span class="badge {tag_class}">{p['type']}</span>
                     </div>
                     <div class="cell {warn_style}" title="Original Text">
-                        <span style="opacity: 0.7; white-space: pre;">{html.escape(p['original'])}</span>
+                        <span style="opacity: 0.7; white-space: pre-wrap;">{html.escape(p['original'])}</span>
                         {lang_indicator}
                     </div>
                     <div class="cell">
-                        <input type="text"
+                        <textarea
                                class="new-input"
-                               value="{html.escape(p['new'])}"
-                               oninput="this.closest('.row').querySelector('.apply-cb').checked = true">
+                               rows="1"
+                               oninput="this.closest('.row').querySelector('.apply-cb').checked = true; this.style.height='auto'; this.style.height=this.scrollHeight+'px';"
+                               >{html.escape(p['new'])}</textarea>
                     </div>
                     <div class="cell">
                         <span class="count-badge">{p['count']}</span>

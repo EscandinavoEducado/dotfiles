@@ -1,20 +1,60 @@
+\DocumentMetadata{tagging=on, pdfstandard=ua-2, lang=pt-BR}
 \documentclass[12pt, a4paper]{article}
 
 % ── Pacotes ──────────────────────────────────────────────────────────────────
+\usepackage{iftex}
+
+\ifluatex
+    \usepackage{fontspec}
+    \usepackage{amsmath, amssymb, amsthm}
+    \usepackage{mathtools}
+    \usepackage[warnings-off={mathtools-coloneq,mathtools-overload}]{unicode-math}
+\else
+    \usepackage[T1]{fontenc}
+    \usepackage[utf8]{inputenc}
+    \usepackage{lmodern}
+    \usepackage{amsmath, amssymb, amsthm}
+    \usepackage{mathtools}
+\fi
+
+\usepackage[brazilian, english]{babel}
+
 \usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2cm]{geometry}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage[brazil]{babel}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage[parfill]{parskip}
+
 \usepackage{graphicx}
-\usepackage{array}
+\usepackage{float}
 \usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{ragged2e}
 \usepackage{setspace}
-\usepackage{parskip}
 \usepackage{titlesec}
+\usepackage{multicol}
+
 \usepackage{xcolor}
-\usepackage{enumitem}
+\definecolor{darkbg}{HTML}{1E1E1E}
+\definecolor{lighttext}{HTML}{D4D4D4}
+\definecolor{linkcolor}{HTML}{569CD6}
+\pagecolor{darkbg}
+\color{lighttext}
+
+\usepackage{csquotes}
+\usepackage[style=abnt]{biblatex}
+\addbibresource{ref.bib}
+
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=linkcolor,
+    filecolor=linkcolor,
+    urlcolor=linkcolor,
+    citecolor=linkcolor,
+    pdftitle={Document Title},
+    pdfauthor={Author Name}
+}
+\usepackage{cleveref}
 
 % ── Formatação de seções ──────────────────────────────────────────────────────
 \titleformat{\section}{\normalsize\bfseries}{}{0em}{}
@@ -22,8 +62,6 @@
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{document}
-\pagecolor{black!85}
-\color{white!90}
 
 % ── CABEÇALHO ─────────────────────────────────────────────────────────────────
 \begin{center}
@@ -53,21 +91,21 @@
 \vspace{0.4cm}
 
 % ── IDENTIFICAÇÃO ────────────────────────────────────────────────────────────
-\noindent\textbf{Colégio/escola:} Nome do colégio/escola\\[4pt]
-\noindent\textbf{Ano:} 6, 7 \ldots\\[4pt]
-\noindent\textbf{Turma:} A, B, \ldots\\[4pt]
-\noindent\textbf{Número de horas-aula:} 1 aula de X minutos (deixar explícito o tempo necessário para a implementação da aula e também se se tratava de um encontro síncrono ou assíncrono).\\[4pt]
-\noindent\textbf{Tema da Aula:} (recorte mais abrangente do conteúdo, exemplo: caracterização do triângulo retângulo, considerando a BNCC).\\[4pt]
-\noindent\textbf{Conteúdo:} (recorte reduzido do tema, exemplo: Ângulos no triângulo retângulo, cateto oposto e adjacente em relação a um ângulo, considerando a BNCC).\\[4pt]
-\noindent\textbf{Objetivo da Aula:} (elencar as competências e habilidades que o estagiário pretende desenvolver por meio do seu estágio, considerando as discriminadas na BNCC).\\[4pt]
-\noindent\textbf{Contexto de aplicação:} (explicar em que momento de um ``plano de unidade'' tal plano de aula se insere. Ou seja, dentro de uma sequência de aulas destinadas ao ensino de determinado conteúdo, explicitar onde esse plano se insere -- introdução, complementação, avaliação).\\[4pt]
-\noindent\textbf{Recursos utilizados (inclusive os computacionais):} (exemplo: computador, geogebra, meet, planilha, questionário on-line, etc.). Além de inserir os recursos, precisa justificar essas opções.\\[4pt]
-\noindent\textbf{Procedimentos/Métodos/Metodologias de Ensino:} [explicitar como será conduzida a aula (ex., aula expositivo-dialogada, trabalho em grupo) e que tendências metodológicas serão utilizadas (ex. modelagem, resolução de problemas, TICs, etc.), justificando essas opções.
+\textbf{Colégio/escola:} Nome do colégio/escola\\[4pt]
+\textbf{Ano:} 6, 7 \ldots\\[4pt]
+\textbf{Turma:} A, B, \ldots\\[4pt]
+\textbf{Número de horas-aula:} 1 aula de X minutos (deixar explícito o tempo necessário para a implementação da aula e também se se tratava de um encontro síncrono ou assíncrono).\\[4pt]
+\textbf{Tema da Aula:} (recorte mais abrangente do conteúdo, exemplo: caracterização do triângulo retângulo, considerando a BNCC).\\[4pt]
+\textbf{Conteúdo:} (recorte reduzido do tema, exemplo: Ângulos no triângulo retângulo, cateto oposto e adjacente em relação a um ângulo, considerando a BNCC).\\[4pt]
+\textbf{Objetivo da Aula:} (elencar as competências e habilidades que o estagiário pretende desenvolver por meio do seu estágio, considerando as discriminadas na BNCC).\\[4pt]
+\textbf{Contexto de aplicação:} (explicar em que momento de um ``plano de unidade'' tal plano de aula se insere. Ou seja, dentro de uma sequência de aulas destinadas ao ensino de determinado conteúdo, explicitar onde esse plano se insere -- introdução, complementação, avaliação).\\[4pt]
+\textbf{Recursos utilizados (inclusive os computacionais):} (exemplo: computador, geogebra, meet, planilha, questionário on-line, etc.). Além de inserir os recursos, precisa justificar essas opções.\\[4pt]
+\textbf{Procedimentos/Métodos/Metodologias de Ensino:} [explicitar como será conduzida a aula (ex., aula expositivo-dialogada, trabalho em grupo) e que tendências metodológicas serão utilizadas (ex. modelagem, resolução de problemas, TICs, etc.), justificando essas opções.
 
 \vspace{0.4cm}
 
 % ── DESENVOLVIMENTO ───────────────────────────────────────────────────────────
-\noindent\textbf{Desenvolvimento:}
+\textbf{Desenvolvimento:}
 
 \begin{itemize}[leftmargin=1.5cm, label={}]
   \item \textit{1º Momento: No decorrer dos ``momentos'' devem ser descritas pormenorizadamente todas as ações desenvolvidas no decorrer da aula;}
@@ -80,21 +118,21 @@
 \vspace{0.4cm}
 
 % ── AVALIAÇÃO ─────────────────────────────────────────────────────────────────
-\noindent\textbf{Avaliação:} Descrever como irá avaliar o trabalho de ensino e aprendizagem desenvolvido durante esta aula.
+\textbf{Avaliação:} Descrever como irá avaliar o trabalho de ensino e aprendizagem desenvolvido durante esta aula.
 
 \vspace{0.4cm}
 
 % ── AVALIAÇÃO DA IMPLEMENTAÇÃO ────────────────────────────────────────────────
-\noindent\textbf{Avaliação da Implementação do Plano de Aula:} Descrever e analisar como foi a implementação do referido plano, destacando se conseguiu executá-lo na íntegra, se precisou fazer alterações no planejamento (quando de sua execução), citando quais foram essas alterações e porque elas ocorreram. Destaque também como foi a participação dos alunos, as dificuldades e facilidades na implementação do referido plano.
+\textbf{Avaliação da Implementação do Plano de Aula:} Descrever e analisar como foi a implementação do referido plano, destacando se conseguiu executá-lo na íntegra, se precisou fazer alterações no planejamento (quando de sua execução), citando quais foram essas alterações e porque elas ocorreram. Destaque também como foi a participação dos alunos, as dificuldades e facilidades na implementação do referido plano.
 
 \vspace{0.4cm}
 
 % ── REFERÊNCIAS ───────────────────────────────────────────────────────────────
-\noindent\textbf{Referências:}
+\textbf{Referências:}
 
 \vspace{1cm}
 
 % ── OBSERVAÇÃO (remover antes de entregar) ────────────────────────────────────
-\noindent{\color{red}\textbf{OBSERVAÇÃO: OS TEXTOS EM VERMELHO DEVEM SER SUBSTITUÍDOS PELOS TEXTOS PRODUZIDOS E ASSOCIADOS AO PLANO DE AULA, TAL COMO ESTA OBSERVAÇÃO DEVERÁ SER EXCLUÍDA DO ARQUIVO.}}
+{\color{red}\textbf{OBSERVAÇÃO: OS TEXTOS EM VERMELHO DEVEM SER SUBSTITUÍDOS PELOS TEXTOS PRODUZIDOS E ASSOCIADOS AO PLANO DE AULA, TAL COMO ESTA OBSERVAÇÃO DEVERÁ SER EXCLUÍDA DO ARQUIVO.}}
 
 \end{document}

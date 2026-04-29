@@ -190,13 +190,42 @@ def sanitize_filename(name: str, is_path_component: bool = False) -> str:
 
 
 def truncate_to_budget(text: str, budget_bytes: int) -> str:
+    """Truncate *text* so its UTF-8 encoding fits within *budget_bytes*.
+
+    Strategy:
+      1. If the text already fits, return it unchanged.
+      2. Find the longest UTF-8-safe prefix within the budget.
+      3. Try to back off to the last word boundary within that prefix.
+         Only do so if it would leave at least half the budget's worth of
+         content — otherwise a single very long word would vanish entirely.
+      4. If we're left with a single word that still overflows (shouldn't
+         happen after step 2, but guards against edge cases), strip
+         characters one by one until it fits.
+      5. No ellipsis is appended — the caller treats truncation as a silent
+         size constraint, not a user-visible signal.
+    """
     encoded = text.encode('utf-8')
     if len(encoded) <= budget_bytes:
         return text
-    target_len = budget_bytes - 3
-    if target_len <= 0:
-        return "..."
-    return encoded[:target_len].decode('utf-8', 'ignore').strip() + "..."
+    if budget_bytes <= 0:
+        return ''
+
+    # Step 2: walk back from the cut point to a valid UTF-8 character boundary.
+    cut = budget_bytes
+    while cut > 0 and (encoded[cut] & 0xC0) == 0x80:
+        cut -= 1
+    prefix = encoded[:cut].decode('utf-8').strip()
+
+    # Step 3: back off to last word boundary if it keeps at least half the budget.
+    space_idx = prefix.rfind(' ')
+    if space_idx >= 0 and len(prefix[:space_idx].encode('utf-8')) >= budget_bytes // 2:
+        prefix = prefix[:space_idx].strip()
+
+    # Step 4: single-word fallback — character-strip until it fits.
+    while len(prefix.encode('utf-8')) > budget_bytes:
+        prefix = prefix[:-1]
+
+    return prefix
 
 
 def get_audio_metadata(file_path: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
@@ -690,13 +719,16 @@ def check_warnings(info: Dict) -> List[str]:
     return sorted(list(warnings))
 
 
-def plan_renames(info: Dict, final_name: str, ignore_disc: bool) -> List[Tuple[str, str]]:
+def plan_renames(info: Dict, final_folder_path: str, ignore_disc: bool) -> List[Tuple[str, str]]:
     plan     = []
     md_list  = info['files_metadata']
     has_disc = any(m.get('disc') for m in md_list)
 
     if has_disc and any(not m.get('disc') for m in md_list):
         return []
+
+    # Byte cost of the folder path prefix including the trailing separator.
+    folder_prefix_bytes = len((final_folder_path + os.sep).encode('utf-8'))
 
     proposed = set()
     for m in md_list:
@@ -709,6 +741,9 @@ def plan_renames(info: Dict, final_name: str, ignore_disc: bool) -> List[Tuple[s
         s_title  = sanitize_filename(m['title'], True)
         s_artist = sanitize_filename(m['artist'], True) if m.get('artist') else ''
 
+        def full_path_bytes(filename: str) -> int:
+            return folder_prefix_bytes + len(filename.encode('utf-8'))
+
         if has_disc and not ignore_disc:
             base = f"{disc}-{track} {s_artist} - {s_title}" if s_artist else f"{disc}-{track} - {s_title}"
         else:
@@ -716,9 +751,18 @@ def plan_renames(info: Dict, final_name: str, ignore_disc: bool) -> List[Tuple[s
 
         new_name = f"{base}{ext}"
 
-        if len(os.path.join(final_name, new_name).encode('utf-8')) > PATH_LENGTH_LIMIT_BYTES:
+        if full_path_bytes(new_name) > PATH_LENGTH_LIMIT_BYTES:
+            # Step 1: drop the artist
             base     = f"{disc}-{track} - {s_title}" if (has_disc and not ignore_disc) else f"{track} - {s_title}"
             new_name = f"{base}{ext}"
+
+        if full_path_bytes(new_name) > PATH_LENGTH_LIMIT_BYTES:
+            # Step 2: truncate the title to fit within the budget
+            prefix       = f"{disc}-{track} - " if (has_disc and not ignore_disc) else f"{track} - "
+            title_budget = PATH_LENGTH_LIMIT_BYTES - folder_prefix_bytes - len((prefix + ext).encode('utf-8'))
+            s_title      = truncate_to_budget(s_title, max(1, title_budget))
+            base         = f"{prefix}{s_title}"
+            new_name     = f"{base}{ext}"
 
         final_base = base
         c = 1
@@ -943,7 +987,7 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
                 tag_plan.append(os.path.join(info['path'], m['filename']))
 
         if not folder_only and not has_critical:
-            p_files = plan_renames(info, final_name, ignore_disc=redundant_disc)
+            p_files = plan_renames(info, final_path, ignore_disc=redundant_disc)
             if p_files:
                 file_rename_plan.extend(p_files)
                 planned_files = p_files

@@ -1,26 +1,56 @@
+\DocumentMetadata{tagging=on, pdfstandard=ua-2, lang=pt-BR}
 \documentclass[12pt, a4paper]{article}
 
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
+\usepackage{iftex}
 
-\usepackage{amsmath, amssymb, amsthm} 
-\usepackage{graphicx}
-\usepackage{float}                 
-\usepackage{geometry}                 
+\ifluatex
+    \usepackage{fontspec}
+    \usepackage{amsmath, amssymb, amsthm}
+    \usepackage{mathtools}
+    \usepackage{unicode-math}
+\else
+    \usepackage[T1]{fontenc}
+    \usepackage[utf8]{inputenc}
+    \usepackage{lmodern}
+    \usepackage{amsmath, amssymb, amsthm}
+    \usepackage{mathtools}
+\fi
+
+\usepackage[brazilian, english]{babel}
+
+\usepackage{geometry}
 \geometry{margin=1in}
-\usepackage{microtype}                
-\usepackage{enumitem}                 
-\usepackage{booktabs}                 
+\usepackage{microtype}
+\usepackage{enumitem}
 \usepackage[parfill]{parskip}
 
-\usepackage{xcolor}
-\definecolor{darkbg}{HTML}{1E1E1E}    
-\definecolor{lighttext}{HTML}{D4D4D4} 
-\definecolor{linkcolor}{HTML}{569CD6}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
 
+\usepackage{tikz}
+\usetikzlibrary{
+    calc,
+    positioning,
+    arrows.meta,
+    shapes.geometric,
+    decorations.pathmorphing,
+    decorations.markings,
+    backgrounds,
+    fit,
+    intersections
+}
+
+\usepackage{xcolor}
+\definecolor{darkbg}{HTML}{1E1E1E}
+\definecolor{lighttext}{HTML}{D4D4D4}
+\definecolor{linkcolor}{HTML}{569CD6}
 \pagecolor{darkbg}
 \color{lighttext}
+
+\usepackage{csquotes}
+\usepackage[style=abnt]{biblatex}
+\addbibresource{references.bib}
 
 \usepackage{hyperref}
 \hypersetup{
@@ -32,6 +62,7 @@
     pdftitle={Document Title},
     pdfauthor={Author Name}
 }
+\usepackage{cleveref}
 
 \title{Article Title}
 \author{Author Name}

@@ -56,7 +56,8 @@ SUPPORTED_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '
 STANDARD_AUDIO_FORMATS     = ('.opus', '.flac')
 COVER_MAX_SIZE             = 700
 PATH_LENGTH_LIMIT_BYTES    = 230
-FILE_NAME_RESERVE_BYTES    = 20
+MIN_FILENAME_BYTES         = 50   # guaranteed floor for the filename (track + title + ext)
+MIN_FOLDERNAME_BYTES       = 30   # guaranteed floor for the album folder name
 ARTWORK_DIRNAME            = 'artwork'
 
 if os.name == 'nt':
@@ -959,8 +960,18 @@ def run_scan_and_plan(root_folders: List[str], options: Dict):
         pure_base   = base[:-len(year_suffix)] if year_suffix else base
 
         parent = os.path.dirname(info['path'])
-        budget = PATH_LENGTH_LIMIT_BYTES - len(parent.encode('utf-8')) - 1 - FILE_NAME_RESERVE_BYTES - len(year_suffix.encode('utf-8')) - 6
-        final_base = truncate_to_budget(pure_base, max(1, budget)) + year_suffix
+        # available = bytes left after the parent path and its trailing separator.
+        # We split this pool between the folder name and the filename, guaranteeing
+        # a floor for each side so neither can starve the other.
+        #   available = folder_name + sep + filename
+        parent_prefix_bytes = len((parent + os.sep).encode('utf-8'))
+        available           = PATH_LENGTH_LIMIT_BYTES - parent_prefix_bytes
+        year_suffix_bytes   = len(year_suffix.encode('utf-8'))
+        # folder gets whatever is left after reserving the filename floor and the
+        # separator between folder and file; year_suffix bytes are also reserved
+        # because they're appended after truncation.
+        folder_budget = max(MIN_FOLDERNAME_BYTES, available - MIN_FILENAME_BYTES - 1 - year_suffix_bytes)
+        final_base = truncate_to_budget(pure_base, max(1, folder_budget)) + year_suffix
 
         counter_key = (parent, final_base)
         if counter_key in needs_num or counters[counter_key] > 0:

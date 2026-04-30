@@ -1,0 +1,121 @@
+\documentclass[12pt,a4paper]{article}
+
+% Detecção de motor e fontes
+\usepackage{iftex}
+\ifpdftex
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+\fi
+
+% Idioma
+\usepackage[brazilian]{babel}
+
+% Geometria da página
+\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
+
+% Pacotes Matemáticos
+\usepackage{amsmath, amsfonts, amssymb}
+
+% Cores e Caixas de texto
+\usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+\newtcolorbox{instrucoes}{
+  colback=black!5,
+  colframe=black,
+  coltext=black,
+  arc=2mm,
+  boxrule=0.8pt,
+  title=Instruções,
+  fonttitle=\bfseries
+}
+
+% Listas e Questões
+\usepackage{enumitem}
+\newlist{questoes}{enumerate}{2}
+\setlist[questoes,1]{label=\textbf{\arabic*.}, leftmargin=1.5em, itemsep=2em}
+\setlist[questoes,2]{label=\alph*), leftmargin=1.5em}
+
+% Cabeçalho Manual
+\newcommand{\cabecalho}{
+  \noindent
+  \begin{minipage}[t]{0.5\textwidth}
+    \vspace{0pt}
+    \textbf{Instituição:} Nome da Escola/Universidade \\[4pt]
+    \textbf{Professor:} Nome do Docente \\[4pt]
+    \textbf{Disciplina:} Matemática
+  \end{minipage}%
+  \begin{minipage}[t]{0.5\textwidth}
+    \vspace{0pt}
+    \raggedleft
+    \begin{tabular}{@{}ll@{}}
+      \textbf{Data:}  & \_\_\_/\_\_\_/\_\_\_\_\_ \\[4pt] 
+      \textbf{Turma:} & \_\_\_\_\_\_\_\_\_\_\_\_ \\[4pt]
+      \textbf{Peso:}  & 10,0 \hspace{0.5cm} \textbf{Nota:}
+    \end{tabular}
+  \end{minipage}
+  \vspace{0.5cm}
+  \begin{center}
+    \rule{\textwidth}{0.4pt} \\
+    \vspace{0.2cm}
+    {\large \textbf{AVALIAÇÃO}} \\
+    \rule{\textwidth}{0.4pt}
+  \end{center}
+  \vspace{0.3cm}
+  \noindent \textbf{Aluno(a):} \hrulefill
+  \vspace{0.8cm}
+}
+
+\begin{document}
+
+\cabecalho
+
+\begin{instrucoes}
+  \begin{itemize}[leftmargin=1.5em]
+    \item As respostas finais das questões objetivas devem ser feitas a caneta (azul ou preta), enquanto as questões discursivas e os cálculos podem ser feitos a lápis.
+    \item Todas as questões, inclusive as objetivas, exigem a apresentação do desenvolvimento. Respostas sem o respectivo desenvolvimento matemático serão desconsideradas ou sofrerão desconto na nota.
+    \item O uso de calculadoras é permitido.
+    \item Mantenha a organização e a legibilidade dos cálculos.
+  \end{itemize}
+\end{instrucoes}
+
+\vspace{0.5cm}
+
+\begin{questoes}
+
+  % Questão de Múltipla Escolha
+  \item (2,5 pontos) Enunciado de uma questão objetiva genérica de múltipla escolha.
+  \begin{enumerate}[label=\alph*)]
+    \item Primeira alternativa
+    \item Segunda alternativa
+    \item Terceira alternativa
+    \item Quarta alternativa
+    \item Quinta alternativa
+  \end{enumerate}
+
+  % Questão Aberta com Subitens
+  \item (3,0 pontos) Enunciado de uma questão discursiva genérica com subitens.
+  \begin{questoes}
+    \item (1,5 ponto) Enunciado do primeiro subitem.
+    \item (1,5 ponto) Enunciado do segundo subitem.
+  \end{questoes}
+  \vspace{4cm} % Espaço para resolução
+
+  % Questão com Fórmula em Bloco
+  \item (2,0 pontos) Enunciado de uma questão discursiva genérica contendo uma fórmula em destaque:
+  \[ f(x) = \int_{a}^{b} g(x) \, dx \]
+  \vspace{5cm}
+
+  % Questão de Verdadeiro ou Falso
+  \item (2,5 pontos) Julgue as afirmações genéricas abaixo como Verdadeiras (V) ou Falsas (F):
+  \begin{itemize}[label=\(\square\)]
+    \item Primeira afirmação para análise.
+    \item Segunda afirmação para análise.
+    \item Terceira afirmação para análise.
+  \end{itemize}
+
+\end{questoes}
+
+\end{document}

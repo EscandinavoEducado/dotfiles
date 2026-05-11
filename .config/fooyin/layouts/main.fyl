@@ -24,6 +24,10 @@
                                                     "Widgets": [
                                                         {
                                                             "PlaylistOrganiser": {
+                                                                "LeftScript": "%node_name%$if(%is_group%, \\[%count%\\],)",
+                                                                "PlayingBackgroundColour": "",
+                                                                "PlayingTextColour": "",
+                                                                "RightScript": "$if($not(%is_group%),%playlist_duration%)"
                                                             }
                                                         },
                                                         {
@@ -33,26 +37,42 @@
                                                                 "ShowHeader": true,
                                                                 "ShowHorizontalScrollbar": false,
                                                                 "ShowVerticalScrollbar": true,
-                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANEAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAbQAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGQAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAAAAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
                                                             }
                                                         }
                                                     ]
                                                 }
                                             },
                                             {
-                                                "DirectoryBrowser": {
-                                                    "DoubleClickAction": 5,
-                                                    "IndentList": true,
-                                                    "MiddleClickAction": 0,
-                                                    "Mode": 1,
-                                                    "RootPath": "/home/salty",
-                                                    "SendPlayback": true,
-                                                    "ShowControls": true,
-                                                    "ShowHidden": false,
-                                                    "ShowHorizontalScrollbar": true,
-                                                    "ShowIcons": true,
-                                                    "ShowLocation": true,
-                                                    "ShowSymLinks": false
+                                                "SplitterVertical": {
+                                                    "State": "AAAA/wAAAAEAAAACAAABMwAAACAA/////wEAAAACAA==",
+                                                    "Widgets": [
+                                                        {
+                                                            "DirectoryBrowser": {
+                                                                "DoubleClickAction": 5,
+                                                                "ID": "d26a5bb29c0f47ce8b552f5143a337ea",
+                                                                "IndentList": true,
+                                                                "MiddleClickAction": 0,
+                                                                "Mode": 1,
+                                                                "RootPath": "/mnt/HDD/Music/Happy Halloween",
+                                                                "SendPlayback": true,
+                                                                "ShowControls": true,
+                                                                "ShowHidden": false,
+                                                                "ShowHorizontalScrollbar": true,
+                                                                "ShowIcons": true,
+                                                                "ShowLocation": true,
+                                                                "ShowSymLinks": false
+                                                            }
+                                                        },
+                                                        {
+                                                            "SearchBar": {
+                                                                "AutoSearch": true,
+                                                                "SearchMode": 0,
+                                                                "ShowAll": false,
+                                                                "Widgets": "d26a5bb29c0f47ce8b552f5143a337ea"
+                                                            }
+                                                        }
+                                                    ]
                                                 }
                                             }
                                         ]
@@ -72,11 +92,11 @@
                     },
                     {
                         "SplitterVertical": {
-                            "State": "AAAA/wAAAAEAAAACAAAB2gAAAHoA/////wEAAAACAA==",
+                            "State": "AAAA/wAAAAEAAAACAAAB4gAAAH0A/////wEAAAACAA==",
                             "Widgets": [
                                 {
                                     "SplitterVertical": {
-                                        "State": "AAAA/wAAAAEAAAACAAAAIAAAAcIA/////wEAAAACAA==",
+                                        "State": "AAAA/wAAAAEAAAACAAAAIAAAAcEA/////wEAAAACAA==",
                                         "Widgets": [
                                             {
                                                 "SplitterHorizontal": {
@@ -128,8 +148,8 @@
                                                                                                     "Widgets": [
                                                                                                         {
                                                                                                             "SeekBar": {
-                                                                                                                "ElapsedTotal": false,
-                                                                                                                "ShowLabels": true
+                                                                                                                "ShowLabels": true,
+                                                                                                                "ShowRemainingTime": false
                                                                                                             }
                                                                                                         },
                                                                                                         {
@@ -187,11 +207,11 @@
                                                     "ChannelScale": 0.9,
                                                     "CursorWidth": 3,
                                                     "Downmix": 0,
-                                                    "ElapsedTotal": false,
                                                     "MaxScale": 1,
                                                     "Mode": 7,
                                                     "ShowCursor": true,
                                                     "ShowLabels": false,
+                                                    "ShowRemainingTime": false,
                                                     "SupersampleFactor": 1,
                                                     "UseCustomColours": false
                                                 }

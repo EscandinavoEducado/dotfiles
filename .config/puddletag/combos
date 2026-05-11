@@ -4,7 +4,9 @@
       "., !",
       "., !/",
       "",
-      ""
+      "., !/(",
+      ".,!/(",
+      ".,!/(:"
     ]
   },
   "filter_text": {
@@ -20,14 +22,15 @@
       "artist;album;title;track;year;discnumber;albumartist;image",
       "artist;album;title;track;year;discnumber;albumartist;_image",
       "artist;album;title;track;year;discnumber;albumartist;__image",
-      "artist;album;title;track;year;discnumber;albumartist;__image"
+      ""
     ]
   },
   "&Format string": {
     "values": [
       "$num(%track%,1)",
       "$num(%year%,1)",
-      "$num(%year%,1)"
+      "%title%",
+      "%title%"
     ]
   },
   "&Regular Expression": {
@@ -47,13 +50,21 @@
   "&Replace": {
     "values": [
       "\\\\",
+      "\u2044",
       "\u2044"
     ]
   },
   "w&ith:": {
     "values": [
       " / ",
+      "/",
       "/"
+    ]
+  },
+  "&Pattern": {
+    "values": [
+      "%dummy% - %title%",
+      "%dummy% - %title%"
     ]
   }
 }

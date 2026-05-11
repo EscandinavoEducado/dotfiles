@@ -19,10 +19,10 @@
   },
   "puddlestuff.functions_formatValue": {
     "arguments": [
-      "$num(%year%,1)"
+      "%title%"
     ],
     "fields": [
-      "year"
+      "album"
     ]
   },
   "puddlestuff.functions_replaceWithReg": {
@@ -55,10 +55,27 @@
   "puddlestuff.functions_titleCase": {
     "arguments": [
       "Mixed Case",
-      ""
+      ".,!/(:"
     ],
     "fields": [
       "title"
+    ]
+  },
+  "puddlestuff.functions_update_from_tag": {
+    "arguments": [
+      "",
+      "APEv2"
+    ],
+    "fields": [
+      "just nothing to do with this"
+    ]
+  },
+  "puddlestuff.functions_filenametotag": {
+    "arguments": [
+      "%dummy% - %title%"
+    ],
+    "fields": [
+      "just nothing to do with this"
     ]
   }
 }

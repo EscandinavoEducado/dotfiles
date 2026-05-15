@@ -37,7 +37,7 @@
                                                                 "ShowHeader": true,
                                                                 "ShowHorizontalScrollbar": false,
                                                                 "ShowVerticalScrollbar": true,
-                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGQAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAAAAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMkAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAZQAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
                                                             }
                                                         }
                                                     ]
@@ -54,7 +54,7 @@
                                                                 "IndentList": true,
                                                                 "MiddleClickAction": 0,
                                                                 "Mode": 1,
-                                                                "RootPath": "/mnt/HDD/Music/Happy Halloween",
+                                                                "RootPath": "/mnt/HDD/Music/BLARF",
                                                                 "SendPlayback": true,
                                                                 "ShowControls": true,
                                                                 "ShowHidden": false,

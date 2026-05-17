@@ -27,7 +27,7 @@
   },
   "puddlestuff.functions_replaceWithReg": {
     "arguments": [
-      " \\(.*\\)",
+      "^.*?\\s-\\s\\d+\\s",
       "",
       false
     ],

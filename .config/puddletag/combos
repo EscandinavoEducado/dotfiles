@@ -30,7 +30,7 @@
       "$num(%track%,1)",
       "$num(%year%,1)",
       "%title%",
-      "%title%"
+      "%dummy% - %title%"
     ]
   },
   "&Regular Expression": {
@@ -38,7 +38,7 @@
       ".*?(19\\d{2}|20\\d{2}).*",
       "\\\\\\\\",
       " \\(.*\\)",
-      " \\(.*\\)"
+      "^.*?\\s-\\s\\d+\\s"
     ]
   },
   "Replace &matches with:": {
@@ -67,6 +67,27 @@
     "values": [
       "%dummy% - %title%",
       "%dummy% - %title%"
+    ]
+  },
+  "&Pattern (extension not required)": {
+    "values": [
+      "tmp_%img_counter%"
+    ]
+  },
+  "&Filenames to check (;-separated, shell wildcards [eg. *] allowed)": {
+    "values": [
+      ""
+    ]
+  },
+  "&Default description (can be pattern):": {
+    "values": [
+      ""
+    ]
+  },
+  "&Separator": {
+    "values": [
+      "",
+      ""
     ]
   }
 }

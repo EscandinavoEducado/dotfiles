@@ -103,7 +103,7 @@ def get_source_info(path: Path) -> dict:
             info["has_tags"] = True
             for key, val in tags.items():
                 info["tag_snapshot"][key] = (
-                    str(val[0]) if isinstance(val, list) and val else str(val)
+                    ";".join(str(v) for v in val) if isinstance(val, list) and val else str(val)
                 )
 
         suffix = path.suffix.lower()

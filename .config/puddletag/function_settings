@@ -37,8 +37,8 @@
   },
   "puddlestuff.functions_replace": {
     "arguments": [
-      "\u2044",
-      "/",
+      "\ufffd",
+      "",
       false,
       false
     ],

@@ -128,4 +128,13 @@
         ],
         "description": "Cria um ambiente de adjustwidth"
     },
+    "pagebreak Espaçado": {
+        "prefix": "BRK",
+        "body": [
+            "",
+            "\\pagebreak",
+            ""
+        ],
+        "description": "Cria um pagebreak com linhas em branco"
+    },
 }

@@ -51,6 +51,16 @@
         ],
         "description": "Cria um ambiente de Definição"
     },
+    "Axioma Customizado": {
+        "prefix": "BAX",
+        "body": [
+            "\\begin{axioma}[${1:}]",
+            "\t$0",
+            "\t\\label{ax:${2:}}",
+            "\\end{axioma}"
+        ],
+        "description": "Cria um ambiente de Definição"
+    },
     "Teorema Customizado": {
         "prefix": "BTEO",
         "body": [

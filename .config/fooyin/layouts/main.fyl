@@ -54,7 +54,7 @@
                                                                 "IndentList": true,
                                                                 "MiddleClickAction": 0,
                                                                 "Mode": 1,
-                                                                "RootPath": "/mnt/HDD/Music/BLARF",
+                                                                "RootPath": "/mnt/HDD/Music",
                                                                 "SendPlayback": true,
                                                                 "ShowControls": true,
                                                                 "ShowHidden": false,
@@ -183,7 +183,7 @@
                                                         {
                                                             "Playlist": {
                                                                 "Columns": "8:132|0:2|1|7:2|2|5|9|22",
-                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYBABYlUGBsYdQNodiDuB7B4g7QLEoQwQNSDACMQsQMwExKxAzAzEbEDMDlJj3/FasSpmx177eRd+Sho9ZLO/1pz7ffqEGvu11l2mexqv2O+RXDX9pEK7/RUnExafVhf71R+TrJ4q7rffmL7l1N70OJDhDP////8PALJPJqA=",
+                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYBADYj0GBsZPQDoAiCcB2QeAtC8QJzBA1IAAIxCzADETELMCMTMQswExO0iN/YToWVNuGz6xX3DE2+6XW4z9tebc79Mn1Nivte4y3dN4xX5XkcOJtQ3G9lecTFh8Wl3sV39MsnqquN9+Y/qWU3vT40CGM/z///8/AAndJ2c=",
                                                                 "ID": "ad10902099de4eb6aae58ab74e9e37af",
                                                                 "Preset": 0,
                                                                 "SingleMode": false
@@ -206,9 +206,12 @@
                                                     "CentreGap": 0,
                                                     "ChannelScale": 0.9,
                                                     "CursorWidth": 3,
+                                                    "DecibelScale": false,
                                                     "Downmix": 0,
                                                     "MaxScale": 1,
                                                     "Mode": 7,
+                                                    "NormaliseToPeak": false,
+                                                    "PeakDisplayMode": 0,
                                                     "ShowCursor": true,
                                                     "ShowLabels": false,
                                                     "ShowRemainingTime": false,

@@ -48,7 +48,7 @@
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['style', 'class'],  // <-- the fix
+        attributeFilter: ['style', 'class'],
     });
 
 })();

@@ -75,5 +75,6 @@
             ]
         }
     ],
-    "latex-workshop.latex.recipe.default": "lastUsed"
+    "latex-workshop.latex.recipe.default": "lastUsed",
+    "latex-workshop.bibtex-format.trailingComma": true
 }

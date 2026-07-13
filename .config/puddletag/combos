@@ -30,7 +30,8 @@
       "$num(%track%,1)",
       "$num(%year%,1)",
       "%title%",
-      "%dummy% - %title%"
+      "%dummy% - %title%",
+      "%title%"
     ]
   },
   "&Regular Expression": {
@@ -53,20 +54,23 @@
     "values": [
       "\\\\",
       "\u2044",
-      "\ufffd"
+      "\ufffd",
+      ";"
     ]
   },
   "w&ith:": {
     "values": [
       " / ",
       "/",
-      ""
+      "",
+      ","
     ]
   },
   "&Pattern": {
     "values": [
       "%dummy% - %title%",
-      "%dummy% - %title%"
+      "%dummy% %artist% - %title%",
+      "%dummy% %artist% - %title%"
     ]
   },
   "&Pattern (extension not required)": {
@@ -87,6 +91,7 @@
   "&Separator": {
     "values": [
       "",
+      ";",
       ""
     ]
   }

@@ -37,13 +37,13 @@
   },
   "puddlestuff.functions_replace": {
     "arguments": [
-      "\ufffd",
-      "",
+      ";",
+      ",",
       false,
       false
     ],
     "fields": [
-      "__all"
+      "artist"
     ]
   },
   "puddlestuff.functions_remove_fields": {
@@ -72,10 +72,26 @@
   },
   "puddlestuff.functions_filenametotag": {
     "arguments": [
-      "%dummy% - %title%"
+      "%dummy% %artist% - %title%"
     ],
     "fields": [
       "just nothing to do with this"
+    ]
+  },
+  "puddlestuff.functions_split_by_sep": {
+    "arguments": [
+      ";"
+    ],
+    "fields": [
+      "artist"
+    ]
+  },
+  "puddlestuff.functions_merge_values": {
+    "arguments": [
+      ""
+    ],
+    "fields": [
+      "__all"
     ]
   }
 }

@@ -16,5 +16,16 @@
       " ",
       false
     ]
+  },
+  "Func1": {
+    "fields": [
+      "title",
+      "album",
+      "artist",
+      "albumartist"
+    ],
+    "func_name": "strip",
+    "module": "puddlestuff.functions",
+    "arguments": []
   }
 }

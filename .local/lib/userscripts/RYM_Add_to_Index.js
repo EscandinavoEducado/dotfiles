@@ -39,9 +39,9 @@
         const input = document.querySelector('input.tag_tags[id^="tags_"]');
         if (!input) return [];
         return input.value
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
     }
 
     function setTagsInputValue(tagsArray) {
@@ -53,8 +53,31 @@
 
     function hasIndexTag() {
         return getCurrentTags()
-        .map((t) => t.toLowerCase())
-        .includes(INDEX_TAG.toLowerCase());
+            .map((t) => t.toLowerCase())
+            .includes(INDEX_TAG.toLowerCase());
+    }
+
+    function waitFor(conditionFn, { timeoutMs = 5000, intervalMs = 150 } = {}) {
+        // Polls conditionFn() until it returns truthy, or timeoutMs elapses.
+        // Resolves with true/false depending on whether the condition was met.
+        // Needed because RYM's setOwnership/setFormat/tags.save calls are
+        // fire-and-forget AJAX with no promise/callback to hook into — the
+        // only way to know a change has actually landed is to watch the DOM.
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const tick = () => {
+                if (conditionFn()) {
+                    resolve(true);
+                    return;
+                }
+                if (Date.now() - start >= timeoutMs) {
+                    resolve(false);
+                    return;
+                }
+                setTimeout(tick, intervalMs);
+            };
+            tick();
+        });
     }
 
     function saveTags() {
@@ -80,7 +103,7 @@
         saveTags();
     }
 
-    function performAdd(widgetId) {
+    async function performAdd(widgetId) {
         const catalogObj = getCatalogObject(widgetId);
         if (!catalogObj) {
             alert('[Add to Index] Could not find the catalog widget on this page.');
@@ -89,17 +112,25 @@
 
         if (!isCurrentlyCatalogued(widgetId)) {
             catalogObj.setOwnership('o');
+            const catalogued = await waitFor(() => isCurrentlyCatalogued(widgetId));
+            if (!catalogued) {
+                console.warn('[AddToIndex] Ownership change did not appear to register in time; attempting format change anyway.');
+            }
         }
 
         const currentFormat = getCurrentFormatText(widgetId);
         if (currentFormat.toLowerCase() !== 'digital') {
             catalogObj.setFormat('MP3');
+            const formatted = await waitFor(() => getCurrentFormatText(widgetId).toLowerCase() === 'digital');
+            if (!formatted) {
+                console.warn('[AddToIndex] Format change did not appear to register in time; attempting tag anyway.');
+            }
         }
 
         addIndexTag();
     }
 
-    function performRemove(widgetId) {
+    async function performRemove(widgetId) {
         const catalogObj = getCatalogObject(widgetId);
         if (!catalogObj) {
             alert('[Add to Index] Could not find the catalog widget on this page.');
@@ -134,8 +165,8 @@
 
         const myCatalogSection = document.getElementById('my_catalog');
         const catalogSectionOuter = myCatalogSection
-        ? myCatalogSection.closest('.section_my_catalog.section_outer')
-        : null;
+            ? myCatalogSection.closest('.section_my_catalog.section_outer')
+            : null;
         const insertionAnchor = catalogSectionOuter || myCatalogSection;
         if (!insertionAnchor || !insertionAnchor.parentNode) return;
 
@@ -154,31 +185,24 @@
 
         updateButtonLabel(btn, widgetId);
 
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             btn.disabled = true;
             const wasIndexed = currentIndexState(widgetId);
 
             try {
                 if (wasIndexed) {
-                    performRemove(widgetId);
+                    await performRemove(widgetId);
                 } else {
-                    performAdd(widgetId);
+                    await performAdd(widgetId);
                 }
             } catch (err) {
                 console.error('[AddToIndex] Error:', err);
                 alert('[Add to Index] Something went wrong — check the console for details.');
             }
 
-            let attempts = 0;
-            const poll = setInterval(() => {
-                attempts++;
-                const nowIndexed = currentIndexState(widgetId);
-                if (nowIndexed !== wasIndexed || attempts > 20) {
-                    clearInterval(poll);
-                    updateButtonLabel(btn, widgetId);
-                    btn.disabled = false;
-                }
-            }, 250);
+            await waitFor(() => currentIndexState(widgetId) !== wasIndexed, { timeoutMs: 5000 });
+            updateButtonLabel(btn, widgetId);
+            btn.disabled = false;
         });
 
         insertionAnchor.parentNode.insertBefore(btn, insertionAnchor.nextSibling);

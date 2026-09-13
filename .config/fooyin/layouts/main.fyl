@@ -1,5 +1,8 @@
 {
     "Name": "main",
+    "Options": {
+        "ApplyWindowSize": false
+    },
     "Version": 1,
     "Widgets": [
         {
@@ -37,7 +40,7 @@
                                                                 "ShowHeader": true,
                                                                 "ShowHorizontalScrollbar": false,
                                                                 "ShowVerticalScrollbar": true,
-                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMkAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAZQAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+                                                                "State": "AAAA/wAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARkAAAACAAAAAAAAAAAAAAAAAAAAAGT/////AAAAhAAAAAAAAAACAAAAZAAAAAEAAAAAAAAAtQAAAAEAAAACAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
                                                             }
                                                         }
                                                     ]
@@ -49,16 +52,25 @@
                                                     "Widgets": [
                                                         {
                                                             "DirectoryBrowser": {
+                                                                "ColumnAlignments": [
+                                                                    1,
+                                                                    2,
+                                                                    1,
+                                                                    1
+                                                                ],
+                                                                "ControlsPosition": 0,
                                                                 "DoubleClickAction": 5,
+                                                                "HeaderState": "AAAABAAAADQAAAAUAAAAAAAAAB0AAAAEAAAAAAAAAAEAAAACAAAAAwAAAAQ/4Y+cGPnBkD/Cu1ErtRK7AAAAAAAAAAA/04MfODHzgwEAAAAAAAAAAA==",
                                                                 "ID": "d26a5bb29c0f47ce8b552f5143a337ea",
                                                                 "IndentList": true,
                                                                 "MiddleClickAction": 0,
                                                                 "Mode": 1,
+                                                                "RestoreSort": false,
                                                                 "RootPath": "/mnt/HDD/Music",
                                                                 "SendPlayback": true,
                                                                 "ShowControls": true,
+                                                                "ShowHeader": true,
                                                                 "ShowHidden": false,
-                                                                "ShowHorizontalScrollbar": true,
                                                                 "ShowIcons": true,
                                                                 "ShowLocation": true,
                                                                 "ShowSymLinks": false
@@ -104,6 +116,11 @@
                                                     "Widgets": [
                                                         {
                                                             "PlayerControls": {
+                                                                "ShowNext": true,
+                                                                "ShowPlayPause": true,
+                                                                "ShowPrevious": true,
+                                                                "ShowRandomTrack": false,
+                                                                "ShowStop": true
                                                             }
                                                         },
                                                         {
@@ -134,7 +151,8 @@
                                                                                                     "ChannelSpacing": 1,
                                                                                                     "FalloffTime": 13,
                                                                                                     "Orientation": 1,
-                                                                                                    "PeakHoldTime": 1.5,
+                                                                                                    "PeakFalloffTime": 13,
+                                                                                                    "PeakHoldTimeMs": 1500,
                                                                                                     "SectionSpacing": 1,
                                                                                                     "ShowLegend": false,
                                                                                                     "ShowPeaks": false,
@@ -183,7 +201,7 @@
                                                         {
                                                             "Playlist": {
                                                                 "Columns": "8:132|0:2|1|7:2|2|5|9|22",
-                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYBADYj0GBsZPQDoAiCcB2QeAtC8QJzBA1IAAIxCzADETELMCMTMQswExO0iN/YToWVNuGz6xX3DE2+6XW4z9tebc79Mn1Nivte4y3dN4xX5XkcOJtQ3G9lecTFh8Wl3sV39MsnqquN9+Y/qWU3vT40CGM/z///8/AAndJ2c=",
+                                                                "HeaderState": "AAAAlXjaY2Bg4GBgYJAEYhMGBiYDIB0FxEsYGBh/AOkwIM5hgKgBAUYgZgFiJiBmBWJmIGYDYnaQGvsJ0bOm3DZ8Yr/giLfdL7cY+2vNud+nT6ixX2vdZbqn8Yr9riKHE2sbjO2vOJmw+LS62K/+mGT1VHG//cb0Laf2pseBDGf4////fwDbzScY",
                                                                 "ID": "ad10902099de4eb6aae58ab74e9e37af",
                                                                 "Preset": 0,
                                                                 "SingleMode": false

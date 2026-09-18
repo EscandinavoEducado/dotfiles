@@ -188,14 +188,22 @@ def capitalize_roman_numerals(text):
     return re.sub(candidate_pattern, replacer, text, flags=re.IGNORECASE)
 
 
-def titlecase_callback(word, **kwargs):
+def titlecase_callback(word, all_caps=False, **kwargs):
     w_lower = word.lower().rstrip('.')
-    if w_lower == 'is':
-        return 'is'
     if w_lower in {'dj', 'mc', 'ep', 'lp', 'vip', 'ost', 'bgm', 'b2b'}:
         return w_lower.upper()
     if w_lower in {'feat', 'ft'}:
         return 'feat.'
+
+    # Handle elision prefixes like l' and d' (e.g. L'incertitude, l'amour, d'accord, D'or)
+    # Prevents titlecase's APOS_SECOND rule from converting L'incertitude -> l'Incertitude -> L'Incertitude
+    m = re.match(r"^([(\[{'\"“‘]*)((?i:[ld])['’])([^\W\d_].*?)([)\]}'\"”’]*)$", word)
+    if m:
+        lead, prefix, rest, trail = m.groups()
+        if all_caps:
+            return lead + prefix[0].upper() + prefix[1] + rest.lower() + trail
+        return lead + prefix + rest + trail
+
     return None
 
 
@@ -349,19 +357,22 @@ def smart_format_text(text, ignore_language_filter=True, case_mode='title'):
             formatted = titlecase(cleaned_text, callback=titlecase_callback)
 
             if formatted:
-                formatted = formatted[0].upper() + formatted[1:]
+                formatted = re.sub(r'^([^\w]*)([a-z])', lambda m: m.group(1) + m.group(2).upper(), formatted)
 
-            # Capitalize letter after slash, backslash, or dashes
+            # Capitalize letter after slash, backslash, dashes, or colons
             def fix_separator_capitalization(m):
                 return m.group(1) + m.group(2) + m.group(3).upper()
 
-            formatted = re.sub(r'([/\\–—])(\s*)([a-z])', fix_separator_capitalization, formatted)
+            formatted = re.sub(r'([/\\–—:])(\s*)([a-z])', fix_separator_capitalization, formatted)
 
             # Capitalize inside brackets/parentheses: (live at wembley) -> (Live at Wembley)
             def fix_bracket_capitalization(m):
                 return m.group(1) + m.group(2).upper()
 
             formatted = re.sub(r'([(\[{]\s*)([a-z])', fix_bracket_capitalization, formatted)
+
+            # Ensure the last word is capitalized (English title case rule: first and last words always capitalized)
+            formatted = re.sub(r'\b([a-z])([a-zA-Z]*)([^\w]*)$', lambda m: m.group(1).upper() + m.group(2) + m.group(3), formatted)
 
             # Normalize feature artist: feat. or ft.
             formatted = re.sub(r'\b(?i:feat|ft)\b\.?', 'feat.', formatted)
@@ -1772,20 +1783,28 @@ HTML_SPA = """<!DOCTYPE html>
 
         function toTitleCase(str) {
             if (!str) return str;
-            const minorWords = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'en', 'for', 'if', 'in', 'of', 'on', 'or', 'the', 'to', 'v', 'via', 'vs', 'is']);
+            const minorWords = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'en', 'for', 'if', 'in', 'of', 'on', 'or', 'the', 'to', 'v', 'via', 'vs', 'b/w']);
             let words = str.toLowerCase().split(' ');
+            const len = words.length;
             let res = words.map((w, idx) => {
                 if (!w) return w;
-                if (idx > 0 && minorWords.has(w)) return w;
-                return w.charAt(0).toUpperCase() + w.slice(1);
+                const isFirst = (idx === 0);
+                const isLast = (idx === len - 1);
+                const cleanW = w.replace(/^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$/gu, '');
+                if (!isFirst && !isLast && minorWords.has(cleanW)) {
+                    return w;
+                }
+                return w.replace(/\\p{L}/u, c => c.toUpperCase());
             }).join(' ');
-            res = res.replace(/([(\\[{/\\\\–—]\\s*)(\\p{L})/gu, (m, p1, p2) => p1 + p2.toUpperCase());
+            res = res.replace(/([(\\[{\\/\\\\–—:]\\s*)(\\p{L})/gu, (m, p1, p2) => p1 + p2.toUpperCase());
+            res = res.replace(/\\b(\\p{L})(\\p{L}*)([^\\p{L}\\p{N}]*)$/gu, (m, p1, p2, p3) => p1.toUpperCase() + p2 + p3);
             res = res.replace(/\\b(?<!')(?=[mdclxvi])(M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3}))\\b/gi, (m) => {
                 const ml = m.toLowerCase();
                 if (['mix', 'dim', 'mid', 'did', 'lid'].includes(ml)) return m;
                 if (m.length > 1 || ml === 'i') return m.toUpperCase();
                 return m;
             });
+            res = res.replace(/\\b(?:feat|ft)\\b\\.?/gi, 'feat.');
             return res;
         }
 
